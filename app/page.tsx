@@ -7,10 +7,45 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  Activity,
+  Baby,
+  BedDouble,
+  BriefcaseBusiness,
+  Building2,
+  BusFront,
+  CloudSun,
+  Dumbbell,
+  Factory,
+  GraduationCap,
+  Hospital,
+  Landmark,
+  Leaf,
+  LibraryBig,
+  MapPinned,
+  PackageCheck,
+  Route,
+  School,
+  ShieldCheck,
+  ShoppingBasket,
+  ShoppingBag,
+  Store,
+  TrainFront,
+  TreePine,
+  TrendingUp,
+  University,
+  UsersRound,
+  Utensils,
+  Waves,
+  Wifi,
+  Wind,
+  type LucideIcon,
+} from "lucide-react";
 
 type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
 type HousingRing = "inner" | "middle" | "outer";
+type MapScale = "local" | "city" | "region";
 
 type HousingZone = {
   id: string;
@@ -96,6 +131,77 @@ const ringNames: Record<HousingRing, string> = {
   inner: "内圈 · 日常服务",
   middle: "中圈 · 城市结构",
   outer: "外圈 · 宏观韧性",
+};
+
+const mapScales: Record<
+  MapScale,
+  {
+    label: string;
+    location: string;
+    title: string;
+    range: string;
+    ring: HousingRing;
+    note: string;
+  }
+> = {
+  local: {
+    label: "近邻层",
+    location: "厦门 · 湖里区模拟片区",
+    title: "社区设施精细评估",
+    range: "约 0–3km",
+    ring: "inner",
+    note: "显示学校、基层医疗、托育、菜场、公园等高频设施",
+  },
+  city: {
+    label: "城市层",
+    location: "厦门市 · 跨区影响",
+    title: "城市结构与高等级服务",
+    range: "约 3–30km",
+    ring: "middle",
+    note: "只保留岗位中心、三甲医院、高校、商圈与综合枢纽",
+  },
+  region: {
+    label: "区域层",
+    location: "福建省 · 厦漳泉都市圈",
+    title: "都市圈与省域联系",
+    range: "约 30–300km",
+    ring: "outer",
+    note: "观察城市等级、区域增长、产业、生态和跨城可达性",
+  },
+};
+
+const factorIcons: Record<string, LucideIcon> = {
+  medical: Activity,
+  education: School,
+  transit: BusFront,
+  care: Baby,
+  retail: ShoppingBasket,
+  green: TreePine,
+  culture: LibraryBig,
+  dining: Utensils,
+  safety: ShieldCheck,
+  commerce: ShoppingBag,
+  employment: BriefcaseBusiness,
+  tertiaryMedical: Hospital,
+  higherEducation: GraduationCap,
+  regionalTransit: TrainFront,
+  publicService: Landmark,
+  logistics: PackageCheck,
+  sports: Dumbbell,
+  digital: Wifi,
+  policy: Building2,
+  regionalGrowth: TrendingUp,
+  air: Wind,
+  ecology: Leaf,
+  industry: Factory,
+  hazard: Waves,
+  demographics: UsersRound,
+  climate: CloudSun,
+  heritage: University,
+  lodging: BedDouble,
+  egress: Route,
+  sanitary: Store,
+  security: ShieldCheck,
 };
 
 const cupFactors = [
@@ -448,6 +554,7 @@ function formatNumber(value: number) {
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("housing");
+  const [mapScale, setMapScale] = useState<MapScale>("local");
   const [activeHousingId, setActiveHousingId] = useState("donggang");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
@@ -455,7 +562,7 @@ export default function Home() {
   const [factorView, setFactorView] = useState<"core" | "all">("all");
   const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("none");
   const [importKey, setImportKey] = useState("");
-  const [importRegion, setImportRegion] = useState("北京市朝阳区");
+  const [importRegion, setImportRegion] = useState("厦门市湖里区");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [customFacilities, setCustomFacilities] = useState<string[]>([]);
   const [manualName, setManualName] = useState("");
@@ -641,10 +748,15 @@ export default function Home() {
     mode === "housing" ? housingRecommendations : cupRecommendations;
   const activeMetrics =
     mode === "housing" ? activeHousing.metrics : activeStadium.metrics;
-  const markers = mode === "housing" ? housingMarkers : cupMarkers;
+  const currentScale = mapScales[mapScale];
+  const markers =
+    mode === "housing"
+      ? housingMarkers.filter((marker) => marker.ring === currentScale.ring)
+      : cupMarkers;
 
   useEffect(() => {
     setFactorView(mode === "housing" ? "all" : "core");
+    if (mode === "housing") setMapScale("local");
     setToast("");
   }, [mode]);
 
@@ -763,7 +875,7 @@ export default function Home() {
         <aside className="control-rail">
           <div className="rail-heading">
             <span className="eyebrow">决策控制台</span>
-            <span className="version">MODEL 1.0</span>
+            <span className="version">MODEL 2.0</span>
           </div>
 
           <div className="control-group">
@@ -812,9 +924,12 @@ export default function Home() {
           <div className="factor-list">
             {factors.slice(0, factorView === "core" ? 9 : factors.length).map((factor) => {
               const score = activeMetrics[factor.key] ?? 0;
+              const FactorIcon = factorIcons[factor.key] ?? MapPinned;
               return (
                 <div className="factor-row" key={factor.key}>
-                  <span className="factor-icon">{factor.short}</span>
+                  <span className="factor-icon" aria-hidden="true">
+                    <FactorIcon size={14} strokeWidth={1.9} />
+                  </span>
                   <span className="factor-copy">
                     <span>
                       {factor.label}
@@ -855,10 +970,10 @@ export default function Home() {
           <div className="map-toolbar">
             <div>
               <span className="eyebrow">
-                {mode === "housing" ? "北京 · 朝阳模拟片区" : "中国 · 东部候选赛区"}
+                {mode === "housing" ? currentScale.location : "中国 · 东部候选赛区"}
               </span>
               <h1>
-                {mode === "housing" ? "居住价值公平性沙盘" : "赛事设施承载力沙盘"}
+                {mode === "housing" ? currentScale.title : "赛事设施承载力沙盘"}
               </h1>
             </div>
             <div className="map-actions">
@@ -868,51 +983,112 @@ export default function Home() {
             </div>
           </div>
 
-          <div className={`map-canvas ${mode}`}>
+          <div className={`map-canvas ${mode} zoom-${mapScale}`}>
             <div className="map-grid" />
             <div className="water-shape" />
             <div className="road road-one" />
             <div className="road road-two" />
             <div className="road road-three" />
 
-            {mode === "housing" ? (
+            {mode === "housing" && (
               <>
-                <button
-                  className={`zone zone-a ${activeHousingId === "beiyuan" ? "active" : ""}`}
-                  onClick={() => setActiveHousingId("beiyuan")}
-                  aria-label="选择北园新城"
-                >
-                  <span>北园新城</span>
-                </button>
-                <button
-                  className={`zone zone-b ${activeHousingId === "hewan" ? "active" : ""}`}
-                  onClick={() => setActiveHousingId("hewan")}
-                  aria-label="选择河湾社区"
-                >
-                  <span>河湾社区</span>
-                </button>
-                <button
-                  className={`zone zone-c ${activeHousingId === "donggang" ? "active" : ""}`}
-                  onClick={() => setActiveHousingId("donggang")}
-                  aria-label="选择东港里"
-                >
-                  <span>东港里</span>
-                </button>
-                <button
-                  className={`zone zone-d ${activeHousingId === "nanhu" ? "active" : ""}`}
-                  onClick={() => setActiveHousingId("nanhu")}
-                  aria-label="选择南湖家园"
-                >
-                  <span>南湖家园</span>
-                </button>
-                <button
-                  className={`zone zone-e ${activeHousingId === "xicheng" ? "active" : ""}`}
-                  onClick={() => setActiveHousingId("xicheng")}
-                  aria-label="选择西城旧里"
-                >
-                  <span>西城旧里</span>
-                </button>
+                <div className="semantic-scale">
+                  <strong>{currentScale.label}</strong>
+                  <span>{currentScale.range}</span>
+                  <small>{currentScale.note}</small>
+                </div>
+                <div className="zoom-control" aria-label="地图语义缩放">
+                  <button
+                    aria-label="放大到更精细层级"
+                    disabled={mapScale === "local"}
+                    onClick={() =>
+                      setMapScale(mapScale === "region" ? "city" : "local")
+                    }
+                  >
+                    +
+                  </button>
+                  <div>
+                    {(["local", "city", "region"] as const).map((scale) => (
+                      <button
+                        key={scale}
+                        className={mapScale === scale ? "active" : ""}
+                        aria-label={`切换到${mapScales[scale].label}`}
+                        onClick={() => setMapScale(scale)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    aria-label="缩小到更宏观层级"
+                    disabled={mapScale === "region"}
+                    onClick={() =>
+                      setMapScale(mapScale === "local" ? "city" : "region")
+                    }
+                  >
+                    −
+                  </button>
+                </div>
               </>
+            )}
+
+            {mode === "housing" ? (
+              mapScale === "local" ? (
+                <>
+                  <button
+                    className={`zone zone-a ${activeHousingId === "beiyuan" ? "active" : ""}`}
+                    onClick={() => setActiveHousingId("beiyuan")}
+                    aria-label="选择北园新城"
+                  >
+                    <span>北园新城</span>
+                  </button>
+                  <button
+                    className={`zone zone-b ${activeHousingId === "hewan" ? "active" : ""}`}
+                    onClick={() => setActiveHousingId("hewan")}
+                    aria-label="选择河湾社区"
+                  >
+                    <span>河湾社区</span>
+                  </button>
+                  <button
+                    className={`zone zone-c ${activeHousingId === "donggang" ? "active" : ""}`}
+                    onClick={() => setActiveHousingId("donggang")}
+                    aria-label="选择东港里"
+                  >
+                    <span>东港里</span>
+                  </button>
+                  <button
+                    className={`zone zone-d ${activeHousingId === "nanhu" ? "active" : ""}`}
+                    onClick={() => setActiveHousingId("nanhu")}
+                    aria-label="选择南湖家园"
+                  >
+                    <span>南湖家园</span>
+                  </button>
+                  <button
+                    className={`zone zone-e ${activeHousingId === "xicheng" ? "active" : ""}`}
+                    onClick={() => setActiveHousingId("xicheng")}
+                    aria-label="选择西城旧里"
+                  >
+                    <span>西城旧里</span>
+                  </button>
+                </>
+              ) : mapScale === "city" ? (
+                <div className="city-overview" aria-label="厦门市城市级影响范围">
+                  <span className="city-zone island">厦门本岛<small>核心服务与岗位</small></span>
+                  <span className="city-zone west">海沧—集美<small>港区、大学与产业</small></span>
+                  <span className="city-zone east">同安—翔安<small>机场、新城与增长轴</small></span>
+                  <i className="commute-line line-a" />
+                  <i className="commute-line line-b" />
+                </div>
+              ) : (
+                <div className="region-overview" aria-label="福建省与厦漳泉都市圈联系">
+                  <span className="region-node fuzhou"><b>福州</b><small>省会资源</small></span>
+                  <span className="region-node quanzhou"><b>泉州</b><small>产业与就业</small></span>
+                  <span className="region-node xiamen"><b>厦门</b><small>区域门户</small></span>
+                  <span className="region-node zhangzhou"><b>漳州</b><small>居住协同</small></span>
+                  <span className="region-node longyan"><b>龙岩</b><small>生态腹地</small></span>
+                  <i className="region-link link-a" />
+                  <i className="region-link link-b" />
+                  <i className="region-link link-c" />
+                </div>
+              )
             ) : (
               <div className="stadium-ring" aria-label="场馆服务范围">
                 <span className="ring-label">5km 服务圈</span>
@@ -960,9 +1136,9 @@ export default function Home() {
             <div className="map-legend">
               {mode === "housing" ? (
                 <>
-                  <span><i className="legend-high" />内圈服务</span>
-                  <span><i className="legend-mid" />中圈岗位 / 商业 / 枢纽</span>
-                  <span><i className="legend-low" />外圈环境 / 韧性</span>
+                  <span><i className="legend-high" />{currentScale.label}</span>
+                  <span><i className="legend-mid" />当前尺度影响对象</span>
+                  <span><i className="legend-low" />风险与负外部性</span>
                   <span><i className="legend-proposed" />建议选址</span>
                 </>
               ) : (
@@ -1144,7 +1320,7 @@ export default function Home() {
 
           <button className="run-button" onClick={() => showToast(`已筛选 ${sitingCandidates.length} 个候选点并完成边际模拟`)}>
             <span>运行新一轮优化</span>
-            <small>硬约束过滤 · 边际模拟 · 帕累托排序 · 稳健性校验</small>
+            <small>当前演示：枚举 + 帕累托 · 生产路由：Greedy / MILP / PSO / NSGA-II + SA</small>
           </button>
         </aside>
       </section>
@@ -1314,6 +1490,50 @@ export default function Home() {
                       max J(x,f) = (1−λ) · Δ人口加权价值 + λ · Δ公平性 − μ · 全生命周期成本 + ρ · 稳健性
                     </div>
                     <p className="algorithm-note">当前演示会对 {sitingCandidates.length} 个“地块 × 设施类型”组合逐一重算，而不是直接把最低分区域写成推荐答案。</p>
+
+                    <h3 className="algorithm-title">自适应求解器：问题不同，算法不同</h3>
+                    <div className="solver-matrix">
+                      <article>
+                        <span>GREEDY</span>
+                        <b>贪心 / 懒惰贪心</b>
+                        <p>单设施、应急补缺或需要秒级反馈。作为基线方案，也为复杂算法生成高质量初始解。</p>
+                      </article>
+                      <article>
+                        <span>MILP</span>
+                        <b>混合整数规划</b>
+                        <p>候选地块明确、约束严格、规模中等时使用；能给出最优性差距，适合学校和基层医疗。</p>
+                      </article>
+                      <article>
+                        <span>PSO</span>
+                        <b>粒子群优化</b>
+                        <p>位置或容量近似连续时先搜索坐标，再吸附到合法地块；适合大型医院、球场和枢纽粗选。</p>
+                      </article>
+                      <article>
+                        <span>NSGA-II + SA</span>
+                        <b>遗传算法 + 模拟退火</b>
+                        <p>多设施、多目标和城市级问题：遗传算法探索帕累托前沿，退火负责移动、交换和容量微调。</p>
+                      </article>
+                    </div>
+                    <div className="hybrid-route">
+                      <b>推荐组合</b>
+                      <span>贪心热启动</span><i>→</i>
+                      <span>规模可控则 MILP 校验</span><i>→</i>
+                      <span>大规模用 NSGA-II</span><i>→</i>
+                      <span>SA 局部精修</span><i>→</i>
+                      <span>多情景稳健性复核</span>
+                    </div>
+
+                    <h3 className="algorithm-title">变量影响系数如何得到</h3>
+                    <div className="weight-sources">
+                      <article><strong>35%</strong><span>规范与专家先验</span><small>国标服务半径、强制条文、AHP / Delphi</small></article>
+                      <article><strong>30%</strong><span>居民偏好</span><small>分年龄家庭调查、最佳—最差法与离散选择</small></article>
+                      <article><strong>20%</strong><span>真实使用行为</span><small>就医、入学、通勤和设施访问频率</small></article>
+                      <article><strong>15%</strong><span>客观信息量</span><small>熵权 / CRITIC，避免高度重复指标重复计权</small></article>
+                    </div>
+                    <div className="weight-disclosure">
+                      <b>当前原型状态</b>
+                      <p>现有13、11、10等基础分来自“权重决策因素ProV1.0”，70% / 20% / 10%是用于演示语义尺度的先验封顶，并非已经由大样本实证得到。生产版应按上面的四路证据重新估计，再做权重±20%的敏感性和排序稳定性检验。房价仍只做样本外验证，不参与权重拟合。</p>
+                    </div>
                   </div>
                 ) : (
                   <div className="model-explainer">
