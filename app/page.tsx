@@ -10,6 +10,7 @@ import {
 
 type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
+type HousingRing = "inner" | "middle" | "outer";
 
 type HousingZone = {
   id: string;
@@ -17,6 +18,7 @@ type HousingZone = {
   subtitle: string;
   population: number;
   price: number;
+  priceReason: string;
   risk: number;
   metrics: MetricMap;
 };
@@ -53,18 +55,48 @@ type ChatMessage = {
 };
 
 const housingFactors = [
-  { key: "medical", label: "医疗健康", short: "医", weight: 13, radius: "≤ 1,000m" },
-  { key: "education", label: "教育配套", short: "学", weight: 11, radius: "300–500m" },
-  { key: "transit", label: "交通出行", short: "行", weight: 10, radius: "300–1,000m" },
-  { key: "care", label: "养老托育", short: "护", weight: 10, radius: "≤ 300m" },
-  { key: "retail", label: "日常购物", short: "购", weight: 9, radius: "300–500m" },
-  { key: "green", label: "公园绿地", short: "园", weight: 8, radius: "300–1,000m" },
-  { key: "culture", label: "文化休闲", short: "文", weight: 7, radius: "500–1,000m" },
-  { key: "commerce", label: "商业消费", short: "商", weight: 7, radius: "≤ 1,000m" },
-  { key: "employment", label: "就业密度", short: "业", weight: 6, radius: "全区" },
-  { key: "policy", label: "政策潜力", short: "策", weight: 6, radius: "宏观" },
-  { key: "dining", label: "餐饮服务", short: "食", weight: 5, radius: "≤ 300m" },
+  { key: "medical", label: "基层医疗", short: "医", weight: 13, radius: "≤ 1km", ring: "inner" },
+  { key: "education", label: "基础教育", short: "学", weight: 11, radius: "≤ 500m", ring: "inner" },
+  { key: "transit", label: "公交可达", short: "行", weight: 10, radius: "≤ 1km", ring: "inner" },
+  { key: "care", label: "养老托育", short: "护", weight: 10, radius: "≤ 300m", ring: "inner" },
+  { key: "retail", label: "日常购物", short: "购", weight: 9, radius: "≤ 500m", ring: "inner" },
+  { key: "green", label: "公园绿地", short: "园", weight: 8, radius: "≤ 1km", ring: "inner" },
+  { key: "culture", label: "文化休闲", short: "文", weight: 7, radius: "≤ 1km", ring: "inner" },
+  { key: "dining", label: "餐饮服务", short: "食", weight: 5, radius: "≤ 300m", ring: "inner" },
+  { key: "safety", label: "社区安全", short: "安", weight: 5, radius: "≤ 1km", ring: "inner" },
+
+  { key: "commerce", label: "大型商业", short: "商", weight: 7, radius: "≤ 5km", ring: "middle" },
+  { key: "employment", label: "岗位可达", short: "业", weight: 7, radius: "30 分钟", ring: "middle" },
+  { key: "tertiaryMedical", label: "三甲医院", short: "院", weight: 5, radius: "≤ 8km", ring: "middle" },
+  { key: "higherEducation", label: "高校资源", short: "校", weight: 3, radius: "≤ 8km", ring: "middle" },
+  { key: "regionalTransit", label: "轨道枢纽", short: "轨", weight: 5, radius: "≤ 5km", ring: "middle" },
+  { key: "publicService", label: "公共服务", short: "政", weight: 4, radius: "区级", ring: "middle" },
+  { key: "logistics", label: "物流配送", short: "配", weight: 2, radius: "≤ 5km", ring: "middle" },
+  { key: "sports", label: "大型场馆", short: "体", weight: 2, radius: "≤ 5km", ring: "middle" },
+  { key: "digital", label: "数字设施", short: "网", weight: 3, radius: "全区", ring: "middle" },
+
+  { key: "policy", label: "政策潜力", short: "策", weight: 6, radius: "城市级", ring: "outer" },
+  { key: "regionalGrowth", label: "区域增长", short: "增", weight: 4, radius: "都市圈", ring: "outer" },
+  { key: "air", label: "空气质量", short: "气", weight: 3, radius: "城市级", ring: "outer" },
+  { key: "ecology", label: "生态廊道", short: "生", weight: 3, radius: "城市级", ring: "outer" },
+  { key: "industry", label: "工业环境", short: "工", weight: 3, radius: "城市级", ring: "outer" },
+  { key: "hazard", label: "灾害韧性", short: "韧", weight: 3, radius: "城市级", ring: "outer" },
+  { key: "demographics", label: "人口结构", short: "人", weight: 2, radius: "区级", ring: "outer" },
+  { key: "climate", label: "气候适应", short: "候", weight: 2, radius: "城市级", ring: "outer" },
+  { key: "heritage", label: "历史文化", short: "史", weight: 1, radius: "城市级", ring: "outer" },
 ] as const;
+
+const housingRingMix: Record<HousingRing, number> = {
+  inner: 0.7,
+  middle: 0.2,
+  outer: 0.1,
+};
+
+const ringNames: Record<HousingRing, string> = {
+  inner: "内圈 · 日常服务",
+  middle: "中圈 · 城市结构",
+  outer: "外圈 · 宏观韧性",
+};
 
 const cupFactors = [
   { key: "transit", label: "交通疏散", short: "运", weight: 22, radius: "赛后 90 分钟" },
@@ -86,6 +118,7 @@ const housingZones: HousingZone[] = [
     subtitle: "高密居住 · 老少比 0.41",
     population: 8.6,
     price: 4.2,
+    priceReason: "次新房供给偏少、开发商品牌和学区预期形成市场溢价，房价高于公共服务模型所能解释的部分。",
     risk: 2,
     metrics: {
       medical: 82,
@@ -95,10 +128,26 @@ const housingZones: HousingZone[] = [
       retail: 84,
       green: 71,
       culture: 65,
+      dining: 86,
+      safety: 81,
       commerce: 79,
       employment: 73,
+      tertiaryMedical: 76,
+      higherEducation: 62,
+      regionalTransit: 86,
+      publicService: 74,
+      logistics: 77,
+      sports: 63,
+      digital: 91,
       policy: 72,
-      dining: 86,
+      regionalGrowth: 78,
+      air: 61,
+      ecology: 58,
+      industry: 72,
+      hazard: 78,
+      demographics: 74,
+      climate: 70,
+      heritage: 42,
     },
   },
   {
@@ -107,6 +156,7 @@ const housingZones: HousingZone[] = [
     subtitle: "滨水住区 · 老龄化 22%",
     population: 6.2,
     price: 3.1,
+    priceReason: "滨水景观带来一定价格支撑，但养老医疗与跨区通勤较弱；景观溢价掩盖了日常服务缺口。",
     risk: 4,
     metrics: {
       medical: 49,
@@ -116,10 +166,26 @@ const housingZones: HousingZone[] = [
       retail: 72,
       green: 90,
       culture: 54,
+      dining: 65,
+      safety: 72,
       commerce: 48,
       employment: 52,
+      tertiaryMedical: 44,
+      higherEducation: 39,
+      regionalTransit: 51,
+      publicService: 55,
+      logistics: 46,
+      sports: 70,
+      digital: 78,
       policy: 68,
-      dining: 65,
+      regionalGrowth: 69,
+      air: 77,
+      ecology: 92,
+      industry: 81,
+      hazard: 58,
+      demographics: 46,
+      climate: 66,
+      heritage: 61,
     },
   },
   {
@@ -128,6 +194,7 @@ const housingZones: HousingZone[] = [
     subtitle: "产城混合 · 通勤人口多",
     population: 7.4,
     price: 2.7,
+    priceReason: "岗位与规划利好尚未充分资本化；传统工业印象、绿地短缺和风险感知压低成交价，因此模型价值高于市场价格。",
     risk: 7,
     metrics: {
       medical: 42,
@@ -137,10 +204,26 @@ const housingZones: HousingZone[] = [
       retail: 56,
       green: 38,
       culture: 41,
+      dining: 67,
+      safety: 57,
       commerce: 62,
       employment: 89,
+      tertiaryMedical: 48,
+      higherEducation: 55,
+      regionalTransit: 76,
+      publicService: 58,
+      logistics: 92,
+      sports: 51,
+      digital: 86,
       policy: 78,
-      dining: 67,
+      regionalGrowth: 88,
+      air: 43,
+      ecology: 39,
+      industry: 42,
+      hazard: 61,
+      demographics: 78,
+      climate: 65,
+      heritage: 31,
     },
   },
   {
@@ -149,6 +232,7 @@ const housingZones: HousingZone[] = [
     subtitle: "成熟住区 · 儿童占比 18%",
     population: 5.8,
     price: 3.7,
+    priceReason: "教育、公园和基层服务共同支撑房价，市场价格与模型价值基本一致，偏差处于可接受范围。",
     risk: 1,
     metrics: {
       medical: 75,
@@ -158,10 +242,26 @@ const housingZones: HousingZone[] = [
       retail: 81,
       green: 84,
       culture: 78,
+      dining: 74,
+      safety: 86,
       commerce: 71,
       employment: 59,
+      tertiaryMedical: 69,
+      higherEducation: 73,
+      regionalTransit: 65,
+      publicService: 82,
+      logistics: 64,
+      sports: 81,
+      digital: 87,
       policy: 57,
-      dining: 74,
+      regionalGrowth: 58,
+      air: 79,
+      ecology: 85,
+      industry: 88,
+      hazard: 84,
+      demographics: 82,
+      climate: 72,
+      heritage: 68,
     },
   },
   {
@@ -170,6 +270,7 @@ const housingZones: HousingZone[] = [
     subtitle: "存量更新 · 建成 28 年",
     population: 9.1,
     price: 3.4,
+    priceReason: "商业、餐饮与公交成熟支撑价格，但老旧住房品质和公园托育短板抵消了区位优势，房价与模型值接近。",
     risk: 5,
     metrics: {
       medical: 67,
@@ -179,10 +280,26 @@ const housingZones: HousingZone[] = [
       retail: 88,
       green: 35,
       culture: 70,
+      dining: 91,
+      safety: 76,
       commerce: 83,
       employment: 66,
+      tertiaryMedical: 88,
+      higherEducation: 67,
+      regionalTransit: 84,
+      publicService: 91,
+      logistics: 72,
+      sports: 58,
+      digital: 82,
       policy: 49,
-      dining: 91,
+      regionalGrowth: 51,
+      air: 49,
+      ecology: 37,
+      industry: 67,
+      hazard: 69,
+      demographics: 56,
+      climate: 61,
+      heritage: 89,
     },
   },
 ];
@@ -248,20 +365,38 @@ const stadiums: Stadium[] = [
 ];
 
 const housingMarkers = [
-  { x: 18, y: 22, icon: "医", label: "社区医院", tone: "coral" },
-  { x: 34, y: 58, icon: "学", label: "实验小学", tone: "blue" },
-  { x: 62, y: 31, icon: "园", label: "河湾公园", tone: "lime" },
-  { x: 73, y: 68, icon: "行", label: "轨道站", tone: "blue" },
-  { x: 51, y: 78, icon: "护", label: "托育中心", tone: "coral" },
-  { x: 85, y: 19, icon: "购", label: "生鲜市集", tone: "lime" },
+  { x: 18, y: 22, icon: "医", label: "社区医院", tone: "coral", ring: "inner" },
+  { x: 34, y: 58, icon: "学", label: "实验小学", tone: "blue", ring: "inner" },
+  { x: 62, y: 31, icon: "园", label: "河湾公园", tone: "lime", ring: "inner" },
+  { x: 51, y: 78, icon: "护", label: "托育中心", tone: "coral", ring: "inner" },
+  { x: 85, y: 19, icon: "购", label: "生鲜市集", tone: "lime", ring: "inner" },
+  { x: 71, y: 64, icon: "商", label: "城市商业中心", tone: "blue", ring: "middle" },
+  { x: 27, y: 40, icon: "业", label: "科技园 · 8.6 万岗位", tone: "lime", ring: "middle" },
+  { x: 78, y: 42, icon: "轨", label: "综合交通枢纽", tone: "blue", ring: "middle" },
+  { x: 45, y: 18, icon: "院", label: "三甲医院", tone: "coral", ring: "middle" },
+  { x: 14, y: 74, icon: "校", label: "大学城", tone: "blue", ring: "middle" },
+  { x: 91, y: 56, icon: "工", label: "工业缓冲区", tone: "coral", ring: "outer" },
+  { x: 57, y: 9, icon: "生", label: "区域生态廊道", tone: "lime", ring: "outer" },
 ];
 
 const cupMarkers = [
-  { x: 44, y: 42, icon: "场", label: "临海竞赛中心", tone: "coral" },
-  { x: 20, y: 71, icon: "站", label: "临港站", tone: "blue" },
-  { x: 74, y: 27, icon: "宿", label: "现有旅馆群", tone: "lime" },
-  { x: 79, y: 72, icon: "医", label: "赛事医院", tone: "coral" },
+  { x: 44, y: 42, icon: "场", label: "临海竞赛中心", tone: "coral", ring: "middle" },
+  { x: 20, y: 71, icon: "站", label: "临港站", tone: "blue", ring: "middle" },
+  { x: 74, y: 27, icon: "宿", label: "现有旅馆群", tone: "lime", ring: "middle" },
+  { x: 79, y: 72, icon: "医", label: "赛事医院", tone: "coral", ring: "middle" },
 ];
+
+const sitingCandidates = [
+  { zoneId: "donggang", factor: "medical", facility: "社区卫生服务中心", parcel: "东南生活圈 E-12", cost: 0.82, boost: 38, robustness: 95 },
+  { zoneId: "donggang", factor: "green", facility: "带状社区公园", parcel: "工业支路更新地块 G-04", cost: 0.64, boost: 34, robustness: 88 },
+  { zoneId: "donggang", factor: "education", facility: "九年一贯制学校", parcel: "轨道站西北地块 S-09", cost: 1.76, boost: 36, robustness: 84 },
+  { zoneId: "hewan", factor: "care", facility: "养老托育复合站", parcel: "滨河路口 C-03", cost: 0.46, boost: 42, robustness: 92 },
+  { zoneId: "hewan", factor: "regionalTransit", facility: "社区接驳枢纽", parcel: "河湾大道 T-08", cost: 0.71, boost: 31, robustness: 86 },
+  { zoneId: "xicheng", factor: "green", facility: "口袋公园组团", parcel: "旧厂院更新地块 G-11", cost: 0.38, boost: 29, robustness: 91 },
+  { zoneId: "xicheng", factor: "care", facility: "嵌入式托育中心", parcel: "西城市场北侧 C-06", cost: 0.29, boost: 35, robustness: 90 },
+  { zoneId: "beiyuan", factor: "culture", facility: "社区文化中心", parcel: "北园中轴 P-02", cost: 0.55, boost: 26, robustness: 82 },
+  { zoneId: "nanhu", factor: "employment", facility: "社区共享办公站", parcel: "南湖轨道上盖 J-05", cost: 0.34, boost: 24, robustness: 79 },
+] as const;
 
 function weightedScore(metrics: MetricMap, factors: readonly { key: string; weight: number }[]) {
   const total = factors.reduce((sum, factor) => sum + factor.weight, 0);
@@ -271,11 +406,40 @@ function weightedScore(metrics: MetricMap, factors: readonly { key: string; weig
   ) / total;
 }
 
+function housingValue(metrics: MetricMap, risk: number) {
+  const ringScores = {
+    inner: weightedScore(
+      metrics,
+      housingFactors.filter((factor) => factor.ring === "inner"),
+    ),
+    middle: weightedScore(
+      metrics,
+      housingFactors.filter((factor) => factor.ring === "middle"),
+    ),
+    outer: weightedScore(
+      metrics,
+      housingFactors.filter((factor) => factor.ring === "outer"),
+    ),
+  };
+  const score =
+    ringScores.inner * housingRingMix.inner +
+    ringScores.middle * housingRingMix.middle +
+    ringScores.outer * housingRingMix.outer -
+    risk;
+  return { score: Math.max(0, score), ringScores };
+}
+
 function stdDev(values: number[]) {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const variance =
     values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
+}
+
+function fairnessIndex(values: number[]) {
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const coefficient = stdDev(values) / mean;
+  return Math.max(0, 100 - coefficient * 310);
 }
 
 function formatNumber(value: number) {
@@ -288,7 +452,7 @@ export default function Home() {
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
   const [budget, setBudget] = useState(3.2);
-  const [factorView, setFactorView] = useState<"core" | "all">("core");
+  const [factorView, setFactorView] = useState<"core" | "all">("all");
   const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("none");
   const [importKey, setImportKey] = useState("");
   const [importRegion, setImportRegion] = useState("北京市朝阳区");
@@ -311,17 +475,26 @@ export default function Home() {
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     return housingZones.map((zone) => {
-      const service = weightedScore(zone.metrics, housingFactors);
-      const priceSignal = 45 + ((zone.price - minPrice) / (maxPrice - minPrice)) * 45;
-      const score = Math.max(0, service * 0.78 + priceSignal * 0.22 - zone.risk);
-      return { ...zone, service, score };
+      const model = housingValue(zone.metrics, zone.risk);
+      // 房价严格位于模型之外：仅在价值评分完成后转换为可比指数。
+      const priceIndex =
+        45 + ((zone.price - minPrice) / (maxPrice - minPrice)) * 45;
+      const residual = priceIndex - model.score;
+      return {
+        ...zone,
+        service: model.score,
+        score: model.score,
+        ringScores: model.ringScores,
+        priceIndex,
+        residual,
+      };
     });
   }, []);
 
   const meanHousingScore =
     housingScores.reduce((sum, zone) => sum + zone.score, 0) / housingScores.length;
   const cv = stdDev(housingScores.map((zone) => zone.score)) / meanHousingScore;
-  const fairness = Math.max(0, 100 - cv * 310);
+  const fairness = fairnessIndex(housingScores.map((zone) => zone.score));
 
   const activeHousing =
     housingScores.find((zone) => zone.id === activeHousingId) ?? housingScores[0];
@@ -332,47 +505,62 @@ export default function Home() {
   const capacityRate = (effectiveCapacity / activeStadium.capacity) * 100;
 
   const housingRecommendations = useMemo<Recommendation[]>(() => {
-    const lowZones = [...housingScores].sort((a, b) => a.score - b.score);
-    const target = lowZones[0];
-    const second = lowZones[1];
-    const gapFactor = [...housingFactors].sort(
-      (a, b) =>
-        (100 - target.metrics[b.key]) * b.weight -
-        (100 - target.metrics[a.key]) * a.weight,
-    )[0];
-    return [
-      {
-        rank: 1,
-        type: gapFactor.label,
-        title: `新建${gapFactor.label === "医疗健康" ? "社区卫生服务中心" : gapFactor.label}`,
-        place: `${target.name} · 东南生活圈`,
-        impact: `价值 +${(8.4 + fairnessWeight / 40).toFixed(1)}`,
-        detail: `覆盖约 ${(target.population * 0.72).toFixed(1)} 万人，优先修复“${gapFactor.label}”缺口，并降低区域离散度。`,
-        score: 96,
-        tone: "lime",
-      },
-      {
-        rank: 2,
-        type: "复合设施",
-        title: "托育 + 社区养老复合站",
-        place: `${second.name} · 滨河路口`,
-        impact: "公平性 +4.6",
-        detail: `以 15 分钟生活圈共址建设，服务老幼人口，单位投资的公平收益最高。`,
-        score: 89,
-        tone: "coral",
-      },
-      {
-        rank: 3,
-        type: "新增住区",
-        title: "适宜新建中密度住区",
-        place: "南湖—东港发展轴",
-        impact: "新增 1.8 万人",
-        detail: "避开内涝与工业缓冲区，复用轨道与教育余量，减少对核心区的新增依赖。",
-        score: 82,
-        tone: "blue",
-      },
-    ];
-  }, [fairnessWeight, housingScores]);
+    const currentScores = housingScores.map((zone) => zone.score);
+    const currentFairness = fairnessIndex(currentScores);
+    const scored = sitingCandidates.map((candidate) => {
+      const zoneIndex = housingScores.findIndex(
+        (zone) => zone.id === candidate.zoneId,
+      );
+      const zone = housingScores[zoneIndex];
+      const factor = housingFactors.find(
+        (item) => item.key === candidate.factor,
+      )!;
+      const nextMetrics = {
+        ...zone.metrics,
+        [candidate.factor]: Math.min(
+          100,
+          zone.metrics[candidate.factor] + candidate.boost,
+        ),
+      };
+      const nextValue = housingValue(nextMetrics, zone.risk).score;
+      const valueGain = nextValue - zone.score;
+      const nextScores = [...currentScores];
+      nextScores[zoneIndex] = nextValue;
+      const fairnessGain = fairnessIndex(nextScores) - currentFairness;
+      const populationBenefit = valueGain * zone.population;
+      const equityShare = fairnessWeight / 100;
+      const budgetPenalty = Math.max(0, candidate.cost - budget) * 8;
+      const objective =
+        populationBenefit * (1 - equityShare) +
+        fairnessGain * 18 * equityShare +
+        candidate.robustness * 0.08 -
+        candidate.cost * 2.5 -
+        budgetPenalty;
+      return {
+        ...candidate,
+        zone,
+        factor,
+        valueGain,
+        fairnessGain,
+        populationBenefit,
+        objective,
+      };
+    });
+
+    return scored
+      .sort((a, b) => b.objective - a.objective)
+      .slice(0, 3)
+      .map((candidate, index) => ({
+        rank: index + 1,
+        type: `${ringNames[candidate.factor.ring]} · ${candidate.factor.label}`,
+        title: `新建${candidate.facility}`,
+        place: `${candidate.zone.name} · ${candidate.parcel}`,
+        impact: `价值 +${candidate.valueGain.toFixed(1)}`,
+        detail: `硬约束通过；公平指数 +${candidate.fairnessGain.toFixed(1)}，人口收益 ${candidate.populationBenefit.toFixed(1)}，成本 ${candidate.cost.toFixed(2)} 亿元。`,
+        score: candidate.robustness,
+        tone: (["lime", "coral", "blue"] as const)[index],
+      }));
+  }, [budget, fairnessWeight, housingScores]);
 
   const cupRecommendations: Recommendation[] = [
     {
@@ -415,7 +603,7 @@ export default function Home() {
   const markers = mode === "housing" ? housingMarkers : cupMarkers;
 
   useEffect(() => {
-    setFactorView("core");
+    setFactorView(mode === "housing" ? "all" : "core");
     setToast("");
   }, [mode]);
 
@@ -468,9 +656,12 @@ export default function Home() {
   function submitChat(text?: string) {
     const question = (text ?? chatInput).trim();
     if (!question) return;
+    const asksAboutPrice = /房价|价格|偏差|高估|低估/.test(question);
     const context =
       mode === "housing"
-        ? `在当前 ${budget.toFixed(1)} 亿元预算和 ${fairnessWeight}% 公平性偏好下，建议先在${housingRecommendations[0].place}建设${housingRecommendations[0].title}。它对低值区的边际提升最大，同时不会继续强化高值中心。`
+        ? asksAboutPrice
+          ? `${activeHousing.name}的模型价值为 ${activeHousing.score.toFixed(1)}，房价指数为 ${activeHousing.priceIndex.toFixed(1)}，残差为 ${activeHousing.residual > 0 ? "+" : ""}${activeHousing.residual.toFixed(1)}。房价没有参与评分；偏差解释是：${activeHousing.priceReason}`
+          : `在当前 ${budget.toFixed(1)} 亿元预算和 ${fairnessWeight}% 公平性偏好下，建议先在${housingRecommendations[0].place}建设${housingRecommendations[0].title}。这是对全部候选点逐点重算价值、公平性和成本后的最高目标函数解。`
         : `${activeStadium.name}的名义容量为 ${formatNumber(activeStadium.capacity)} 人，但当前瓶颈是住宿，仅能承载 ${formatNumber(effectiveCapacity)} 人。应先建设临港站东侧旅馆组团，再配置 P+R 接驳，完成后再复算医疗与公卫瓶颈。`;
     setMessages((items) => [
       ...items,
@@ -578,7 +769,7 @@ export default function Home() {
           </div>
 
           <div className="factor-list">
-            {factors.slice(0, factorView === "core" ? 6 : factors.length).map((factor) => {
+            {factors.slice(0, factorView === "core" ? 9 : factors.length).map((factor) => {
               const score = activeMetrics[factor.key] ?? 0;
               return (
                 <div className="factor-row" key={factor.key}>
@@ -586,7 +777,11 @@ export default function Home() {
                   <span className="factor-copy">
                     <span>
                       {factor.label}
-                      <small>{factor.radius}</small>
+                      <small>
+                        {"ring" in factor
+                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.radius}`
+                          : factor.radius}
+                      </small>
                     </span>
                     <i>
                       <b style={{ width: `${score}%` }} />
@@ -600,8 +795,8 @@ export default function Home() {
 
           {factorView === "all" && mode === "housing" && (
             <div className="extended-factors">
-              <span>扩展修正</span>
-              <p>安全 · 地形 · 日照 · 微气候 · 洪涝 · 地质 · 年龄结构 · 数字设施</p>
+              <span>三层权重封顶</span>
+              <p>内圈生活服务 70% · 中圈城市结构 20% · 外圈宏观韧性 10%；洪涝、污染和地质危险另做硬约束。</p>
             </div>
           )}
 
@@ -690,7 +885,7 @@ export default function Home() {
             {markers.map((marker) => (
               <button
                 key={marker.label}
-                className={`map-marker ${marker.tone}`}
+                className={`map-marker ${marker.tone} ${marker.ring}`}
                 style={
                   {
                     "--marker-x": `${marker.x}%`,
@@ -722,10 +917,21 @@ export default function Home() {
             ))}
 
             <div className="map-legend">
-              <span><i className="legend-high" />高价值</span>
-              <span><i className="legend-mid" />中价值</span>
-              <span><i className="legend-low" />待改善</span>
-              <span><i className="legend-proposed" />建议选址</span>
+              {mode === "housing" ? (
+                <>
+                  <span><i className="legend-high" />内圈服务</span>
+                  <span><i className="legend-mid" />中圈岗位 / 商业 / 枢纽</span>
+                  <span><i className="legend-low" />外圈环境 / 韧性</span>
+                  <span><i className="legend-proposed" />建议选址</span>
+                </>
+              ) : (
+                <>
+                  <span><i className="legend-high" />高承载</span>
+                  <span><i className="legend-mid" />中承载</span>
+                  <span><i className="legend-low" />瓶颈</span>
+                  <span><i className="legend-proposed" />建议选址</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -740,14 +946,18 @@ export default function Home() {
                   </span>
                 </div>
                 <div className="score-stat">
-                  <span>服务价值</span>
-                  <strong>{activeHousing.service.toFixed(1)}</strong>
-                  <small>可达性 × 容量 × 品质</small>
+                  <span>三层模型价值</span>
+                  <strong>{activeHousing.score.toFixed(1)}</strong>
+                  <small>
+                    内 {activeHousing.ringScores.inner.toFixed(0)} · 中 {activeHousing.ringScores.middle.toFixed(0)} · 外 {activeHousing.ringScores.outer.toFixed(0)}
+                  </small>
                 </div>
                 <div className="score-stat">
-                  <span>房价信号</span>
+                  <span>市场房价 · 仅用于验证</span>
                   <strong>{activeHousing.price.toFixed(1)} 万</strong>
-                  <small>用于校准，不直接替代价值</small>
+                  <small>
+                    价格指数 {activeHousing.priceIndex.toFixed(0)} · 偏差 {activeHousing.residual > 0 ? "+" : ""}{activeHousing.residual.toFixed(1)}
+                  </small>
                 </div>
                 <div className="score-stat warning">
                   <span>最大短板</span>
@@ -755,11 +965,12 @@ export default function Home() {
                     {
                       [...housingFactors].sort(
                         (a, b) =>
-                          activeHousing.metrics[a.key] - activeHousing.metrics[b.key],
+                          (100 - activeHousing.metrics[b.key]) * b.weight -
+                          (100 - activeHousing.metrics[a.key]) * a.weight,
                       )[0].label
                     }
                   </strong>
-                  <small>优先进入候选设施生成</small>
+                  <small>缺口 × 权重后进入候选设施生成</small>
                 </div>
               </>
             ) : (
@@ -834,9 +1045,42 @@ export default function Home() {
             </p>
           </section>
 
+          {mode === "housing" && (
+            <section className="price-audit-card">
+              <div className="price-audit-head">
+                <span>房价事后校验</span>
+                <b>不进入评分</b>
+              </div>
+              <div className="audit-row">
+                <span>模型价值</span>
+                <i><b style={{ width: `${activeHousing.score}%` }} /></i>
+                <strong>{activeHousing.score.toFixed(1)}</strong>
+              </div>
+              <div className="audit-row market">
+                <span>房价指数</span>
+                <i><b style={{ width: `${activeHousing.priceIndex}%` }} /></i>
+                <strong>{activeHousing.priceIndex.toFixed(1)}</strong>
+              </div>
+              <div className={`residual ${Math.abs(activeHousing.residual) >= 8 ? "large" : ""}`}>
+                <span>
+                  {Math.abs(activeHousing.residual) < 8
+                    ? "价值与房价基本相符"
+                    : activeHousing.residual > 0
+                      ? "房价高于设施价值"
+                      : "模型价值高于房价"}
+                </span>
+                <strong>
+                  {activeHousing.residual > 0 ? "+" : ""}
+                  {activeHousing.residual.toFixed(1)}
+                </strong>
+              </div>
+              <p>{activeHousing.priceReason}</p>
+            </section>
+          )}
+
           <div className="recommendation-heading">
             <span>选址建议</span>
-            <small>按边际公共收益排序</small>
+            <small>按可解释目标函数排序</small>
           </div>
 
           <div className="recommendation-list">
@@ -857,9 +1101,9 @@ export default function Home() {
             ))}
           </div>
 
-          <button className="run-button" onClick={() => showToast("已生成 24 个候选点并完成多目标排序")}>
+          <button className="run-button" onClick={() => showToast(`已筛选 ${sitingCandidates.length} 个候选点并完成边际模拟`)}>
             <span>运行新一轮优化</span>
-            <small>NSGA-II · 24 候选点 · 3 个帕累托解</small>
+            <small>硬约束过滤 · 边际模拟 · 帕累托排序 · 稳健性校验</small>
           </button>
         </aside>
       </section>
@@ -893,6 +1137,11 @@ export default function Home() {
             <button type="button" onClick={() => submitChat("把公平性权重提高后会怎样？")}>
               对比公平 / 效率
             </button>
+            {mode === "housing" && (
+              <button type="button" onClick={() => submitChat(`${activeHousing.name}的房价为什么与模型价值有偏差？`)}>
+                解释房价偏差
+              </button>
+            )}
           </div>
           <div className="chat-input">
             <input
@@ -998,15 +1247,32 @@ export default function Home() {
                 {mode === "housing" ? (
                   <div className="model-explainer">
                     <div className="formula">
-                      V<sub>i</sub> = 0.78 Σ w<sub>j</sub> · A<sub>ij</sub> + 0.22 P<sub>i</sub> − R<sub>i</sub>
+                      V<sub>i</sub> = 0.70 L<sub>i</sub> + 0.20 M<sub>i</sub> + 0.10 O<sub>i</sub> − R<sub>i</sub>
                     </div>
                     <div className="model-grid">
-                      <article><b>A · 可达服务</b><p>路网距离衰减 × 设施容量 / 人口需求 × 质量系数，不使用简单的“1/距离”。</p></article>
-                      <article><b>P · 房价校准</b><p>房价作为市场信号参与校准，但占比受控，避免把既有高价直接认定为公共价值。</p></article>
-                      <article><b>R · 风险约束</b><p>污染、洪涝、地质危险先执行一票否决；地形、日照与工业影响再做乘法修正。</p></article>
-                      <article><b>J · 公平目标</b><p>最小化各住区价值的变异系数，同时最大化人口加权收益并约束全生命周期成本。</p></article>
+                      <article><b>L · 内圈 70%</b><p>基层医疗、基础教育、公交、养老托育、购物、公园、文化、餐饮与社区安全；使用路网时间衰减、容量供需比和品质系数。</p></article>
+                      <article><b>M · 中圈 20%</b><p>大型商场、岗位可达、三甲医院、高校、轨道枢纽、公共服务、物流、场馆与数字设施，反映跨生活圈城市结构。</p></article>
+                      <article><b>O · 外圈 10%</b><p>政策与区域增长、空气、生态、工业环境、灾害韧性、人口结构、气候和历史文化；权重低但不再遗漏。</p></article>
+                      <article><b>R · 硬约束</b><p>污染地块、洪涝、滑坡、断裂带和危化品距离先过滤；地形、日照与工业影响再作连续修正。</p></article>
                     </div>
-                    <div className="objective">max J = Δ人口加权价值 + λ · Δ公平性 − μ · 全生命周期成本</div>
+                    <div className="price-rule">
+                      <b>房价不进入 V</b>
+                      <p>模型评分完成后，才将同一市场内房价转为指数 H。残差 e = H − V 只用于验证：大正残差提示学区预期、稀缺性或投机溢价；大负残差提示环境污名、更新滞后或潜力尚未资本化。</p>
+                    </div>
+                    <h3 className="algorithm-title">选址建议如何生成</h3>
+                    <div className="siting-steps">
+                      <span><b>01</b>生成候选点<small>可建设地块、路口与存量更新点</small></span>
+                      <i>→</i>
+                      <span><b>02</b>硬约束过滤<small>用地、灾害、安全距离与预算</small></span>
+                      <i>→</i>
+                      <span><b>03</b>逐点边际模拟<small>重算可达性、价值与公平指数</small></span>
+                      <i>→</i>
+                      <span><b>04</b>帕累托排序<small>收益、均衡、成本与稳健性</small></span>
+                    </div>
+                    <div className="objective">
+                      max J(x,f) = (1−λ) · Δ人口加权价值 + λ · Δ公平性 − μ · 全生命周期成本 + ρ · 稳健性
+                    </div>
+                    <p className="algorithm-note">当前演示会对 {sitingCandidates.length} 个“地块 × 设施类型”组合逐一重算，而不是直接把最低分区域写成推荐答案。</p>
                   </div>
                 ) : (
                   <div className="model-explainer">
