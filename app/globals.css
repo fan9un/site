@@ -464,6 +464,64 @@ input[type="range"]::-webkit-slider-thumb {
   line-height: 1.55;
 }
 
+.transport-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #d4dad3;
+  border-radius: 10px;
+  background: #f4f6f0;
+}
+
+.transport-breakdown > div,
+.transport-breakdown > p {
+  grid-column: 1 / -1;
+}
+
+.transport-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.transport-breakdown > div span {
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.transport-breakdown > div b {
+  color: #2d795f;
+  font: 800 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.transport-breakdown > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: white;
+}
+
+.transport-breakdown > span small {
+  color: #74817c;
+  font-size: 7px;
+}
+
+.transport-breakdown > span strong {
+  font: 750 8px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.transport-breakdown > p {
+  margin: 2px 0 0;
+  color: #85918c;
+  font-size: 7px;
+  line-height: 1.5;
+}
+
 .model-link {
   width: 100%;
   gap: 10px;
@@ -582,6 +640,146 @@ input[type="range"]::-webkit-slider-thumb {
 .zoom-region .road {
   opacity: 0.2;
 }
+
+.transport-network,
+.transport-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.transport-network {
+  z-index: 4;
+}
+
+.transport-layer {
+  display: none;
+}
+
+.zoom-local .local-transport,
+.zoom-city .city-transport,
+.zoom-region .region-transport {
+  display: block;
+}
+
+.transport-line {
+  position: absolute;
+  display: block;
+  height: 0;
+  transform-origin: left center;
+}
+
+.walk-line {
+  border-top: 2px solid rgba(73, 94, 86, 0.45);
+}
+
+.walk-a { width: 38%; left: 9%; top: 31%; transform: rotate(11deg); }
+.walk-b { width: 31%; left: 39%; top: 69%; transform: rotate(-17deg); }
+
+.cycle-line {
+  border-top: 3px dashed rgba(142, 183, 54, 0.86);
+}
+
+.cycle-a { width: 55%; left: 15%; top: 79%; transform: rotate(-27deg); }
+
+.bus-line {
+  border-top: 4px solid rgba(27, 145, 114, 0.82);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.48);
+}
+
+.bus-a { width: 69%; left: 7%; top: 52%; transform: rotate(-8deg); }
+.bus-b { width: 47%; left: 45%; top: 22%; transform: rotate(61deg); }
+
+.metro-line {
+  border-top: 5px solid rgba(53, 110, 174, 0.84);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.66);
+}
+
+.metro-a { width: 64%; left: 19%; top: 72%; transform: rotate(-41deg); }
+
+.transport-stop {
+  position: absolute;
+  z-index: 5;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 50%;
+  color: white;
+  font: 800 6px ui-monospace, SFMono-Regular, Consolas, monospace;
+  box-shadow: 0 3px 9px rgba(10, 23, 20, 0.2);
+}
+
+.metro-stop { background: #356eae; }
+.bus-stop { background: #1b9172; }
+.stop-a { left: 35%; top: 56%; }
+.stop-b { left: 64%; top: 34%; }
+.stop-c { left: 51%; top: 45%; }
+
+.route-tag {
+  position: absolute;
+  z-index: 6;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 4px;
+  color: #42534d;
+  background: rgba(251, 250, 245, 0.82);
+  box-shadow: 0 3px 10px rgba(10, 23, 20, 0.08);
+  font-size: 6px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.local-tag-a { left: 20%; top: 45%; }
+.local-tag-b { left: 25%; top: 72%; color: #668d19; }
+.local-tag-c { left: 64%; top: 28%; color: #356eae; }
+
+.city-metro {
+  border-top: 6px solid rgba(53, 110, 174, 0.78);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+
+.city-metro-a { width: 68%; left: 13%; top: 60%; transform: rotate(-21deg); }
+
+.city-brt {
+  border-top: 5px dashed rgba(27, 145, 114, 0.82);
+}
+
+.city-brt-a { width: 55%; left: 25%; top: 38%; transform: rotate(18deg); }
+
+.city-road {
+  border-top: 8px double rgba(89, 105, 98, 0.54);
+}
+
+.city-road-a { width: 76%; left: 8%; top: 74%; transform: rotate(-8deg); }
+
+.city-ferry {
+  border-top: 3px dotted rgba(55, 137, 187, 0.88);
+}
+
+.city-ferry-a { width: 34%; left: 50%; top: 28%; transform: rotate(33deg); }
+.city-tag-a { left: 26%; top: 53%; color: #356eae; }
+.city-tag-b { left: 53%; top: 43%; color: #1b765f; }
+.city-tag-c { left: 15%; top: 70%; }
+.city-tag-d { left: 72%; top: 37%; color: #327da5; }
+
+.regional-rail {
+  border-top: 6px solid rgba(53, 110, 174, 0.78);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.regional-rail-a { width: 66%; left: 27%; top: 18%; transform: rotate(62deg); }
+
+.regional-road {
+  border-top: 5px dashed rgba(50, 113, 90, 0.68);
+}
+
+.regional-road-a { width: 48%; left: 24%; top: 78%; transform: rotate(-9deg); }
+.regional-road-b { width: 48%; left: 13%; top: 49%; transform: rotate(34deg); }
+.region-tag-a { left: 67%; top: 52%; color: #356eae; }
+.region-tag-b { left: 37%; top: 74%; color: #2f705c; }
+.region-tag-c { left: 18%; top: 56%; color: #2f705c; }
 
 .semantic-scale {
   position: absolute;
@@ -743,6 +941,22 @@ input[type="range"]::-webkit-slider-thumb {
   border: 1px solid rgba(38, 86, 72, 0.3);
   background: rgba(255, 255, 255, 0.17);
   clip-path: polygon(28% 0, 69% 4%, 88% 23%, 74% 42%, 100% 64%, 76% 81%, 52% 74%, 32% 100%, 11% 77%, 18% 50%, 0 28%);
+}
+
+.regional-context-note {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 8;
+  max-width: 190px;
+  padding: 7px 9px;
+  border: 1px solid rgba(49, 92, 77, 0.22);
+  border-radius: 8px;
+  color: #52665e;
+  background: rgba(251, 250, 245, 0.86);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .region-node {
@@ -1040,6 +1254,35 @@ input[type="range"]::-webkit-slider-thumb {
   width: 8px;
   height: 8px;
   border-radius: 2px;
+}
+
+.map-legend i.legend-line {
+  width: 17px;
+  height: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.legend-line.walk { border-top: 2px solid #5f746c; }
+.legend-line.cycle { border-top: 3px dashed #8eb736; }
+.legend-line.bus,
+.legend-line.brt { border-top: 4px solid #1b9172; }
+.legend-line.brt { border-top-style: dashed; }
+.legend-line.metro,
+.legend-line.rail { border-top: 4px solid #356eae; }
+.legend-line.road { border-top: 4px double #596962; }
+.legend-line.ferry { border-top: 3px dotted #3789bb; }
+
+.legend-node {
+  border: 2px solid white;
+  border-radius: 50% !important;
+  background: var(--lime);
+  box-shadow: 0 0 0 1px #7e9860;
+}
+
+.legend-context {
+  border: 1px solid #82918b;
+  background: rgba(251, 250, 245, 0.9);
 }
 
 .legend-high { background: var(--lime); }
@@ -1885,6 +2128,26 @@ input[type="range"]::-webkit-slider-thumb {
 .price-rule p {
   margin: 8px 0 0;
   color: #65766f;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.regional-rule {
+  margin-top: 11px;
+  padding: 13px;
+  border: 1px solid #c7d7d1;
+  border-radius: 11px;
+  background: #eaf3ef;
+}
+
+.regional-rule b {
+  color: #2c6f5c;
+  font-size: 9px;
+}
+
+.regional-rule p {
+  margin: 7px 0 0;
+  color: #61756d;
   font-size: 9px;
   line-height: 1.6;
 }

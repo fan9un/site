@@ -48,6 +48,15 @@ type HousingRing = "inner" | "middle" | "outer";
 type MapScale = "local" | "city" | "region";
 type Coord = { lat: number; lng: number };
 type DecayType = "gaussian" | "exponential" | "gravity";
+type TransportMode =
+  | "walk"
+  | "bike"
+  | "bus"
+  | "brt"
+  | "metro"
+  | "road"
+  | "ferry"
+  | "rail";
 
 type Demographics = {
   elderlyRatio: number;
@@ -85,6 +94,7 @@ type Facility = Coord & {
   capacity: number;
   quality: number;
   openingYear: number;
+  transportMode?: TransportMode;
 };
 
 type LandParcel = {
@@ -159,6 +169,7 @@ type Recommendation = {
 
 type PortfolioEvaluation = {
   scores: number[];
+  equityScores: number[];
   efficiencyBenefit: number;
   equityBenefit: number;
   lifecycleCost: number;
@@ -210,10 +221,22 @@ const housingRingMix: Record<HousingRing, number> = {
   outer: 0.1,
 };
 
+const regionalContextMetrics: MetricMap = {
+  policy: 73,
+  regionalGrowth: 78,
+  air: 66,
+  ecology: 74,
+  industry: 64,
+  hazard: 71,
+  demographics: 69,
+  climate: 70,
+  heritage: 82,
+};
+
 const ringNames: Record<HousingRing, string> = {
   inner: "内圈 · 日常服务",
   middle: "中圈 · 城市结构",
-  outer: "外圈 · 宏观韧性",
+  outer: "区域层 · 共享背景",
 };
 
 const mapScales: Record<
@@ -249,7 +272,7 @@ const mapScales: Record<
     title: "都市圈与省域联系",
     range: "约 30–300km",
     ring: "outer",
-    note: "观察城市等级、区域增长、产业、生态和跨城可达性",
+    note: "同一城区共享背景值；用于跨城市比较、新城选址与长期情景，不参与区内公平排序",
   },
 };
 
@@ -742,10 +765,13 @@ const existingFacilities: Facility[] = [
   { id: "e-01", type: "education", name: "北园实验学校", lat: 24.532, lng: 118.134, capacity: 1650, quality: 0.9, openingYear: 2020 },
   { id: "e-02", type: "education", name: "南湖小学", lat: 24.499, lng: 118.131, capacity: 1450, quality: 0.94, openingYear: 2015 },
   { id: "e-03", type: "education", name: "河湾学校", lat: 24.516, lng: 118.111, capacity: 980, quality: 0.78, openingYear: 2011 },
-  { id: "t-01", type: "transit", name: "北园公交中心", lat: 24.53, lng: 118.128, capacity: 6600, quality: 0.92, openingYear: 2019 },
-  { id: "t-02", type: "transit", name: "南湖换乘站", lat: 24.505, lng: 118.139, capacity: 5800, quality: 0.87, openingYear: 2017 },
-  { id: "t-03", type: "transit", name: "东港支线站", lat: 24.493, lng: 118.16, capacity: 4700, quality: 0.8, openingYear: 2023 },
-  { id: "t-04", type: "transit", name: "河湾轨道站（规划）", lat: 24.514, lng: 118.102, capacity: 8200, quality: 0.94, openingYear: 2029 },
+  { id: "t-01", type: "transit", name: "北园公交中心", lat: 24.53, lng: 118.128, capacity: 6600, quality: 0.92, openingYear: 2019, transportMode: "bus" },
+  { id: "t-02", type: "transit", name: "南湖 BRT 换乘站", lat: 24.505, lng: 118.139, capacity: 5800, quality: 0.87, openingYear: 2017, transportMode: "brt" },
+  { id: "t-03", type: "transit", name: "东港地铁支线站", lat: 24.493, lng: 118.16, capacity: 4700, quality: 0.8, openingYear: 2023, transportMode: "metro" },
+  { id: "t-04", type: "transit", name: "河湾轨道站（规划）", lat: 24.514, lng: 118.102, capacity: 8200, quality: 0.94, openingYear: 2029, transportMode: "metro" },
+  { id: "t-05", type: "transit", name: "西城公交首末站", lat: 24.522, lng: 118.082, capacity: 5200, quality: 0.79, openingYear: 2014, transportMode: "bus" },
+  { id: "t-06", type: "transit", name: "南湖骑行换乘点", lat: 24.499, lng: 118.14, capacity: 1800, quality: 0.82, openingYear: 2022, transportMode: "bike" },
+  { id: "t-07", type: "transit", name: "东港轮渡接驳", lat: 24.486, lng: 118.172, capacity: 3600, quality: 0.76, openingYear: 2020, transportMode: "ferry" },
   { id: "c-01", type: "care", name: "北园托育中心", lat: 24.538, lng: 118.132, capacity: 280, quality: 0.84, openingYear: 2021 },
   { id: "c-02", type: "care", name: "南湖养老服务站", lat: 24.5, lng: 118.128, capacity: 360, quality: 0.88, openingYear: 2019 },
   { id: "c-03", type: "care", name: "西城日间照料站", lat: 24.519, lng: 118.087, capacity: 190, quality: 0.72, openingYear: 2014 },
@@ -884,16 +910,60 @@ function deriveZoneMetrics(
 ) {
   const metrics = { ...zone.metrics };
   housingFactors
-    .filter((factor) => factor.ring === "inner")
+    .filter((factor) => factor.ring === "inner" && factor.key !== "transit")
     .forEach((factor) => {
       metrics[factor.key] = facilityScore(zone, facilities, factor.key, year);
     });
+
+  const modeScore = (...modes: TransportMode[]) =>
+    facilityScore(
+      zone,
+      facilities.filter(
+        (facility) =>
+          facility.type === "transit" &&
+          facility.transportMode &&
+          modes.includes(facility.transportMode),
+      ),
+      "transit",
+      year,
+    );
+  const bus = modeScore("bus", "brt");
+  const metro = modeScore("metro");
+  const bikeInfrastructure = modeScore("bike");
+  const ferry = modeScore("ferry", "rail");
+  const walking =
+    metrics.retail * 0.36 + metrics.green * 0.3 + metrics.safety * 0.34;
+  const cycling =
+    bikeInfrastructure * 0.56 + metrics.green * 0.26 + metrics.safety * 0.18;
+  const road = zone.metrics.transit;
+  const ferryRail = ferry * 0.42 + zone.metrics.regionalTransit * 0.58;
+  const transportBreakdown = {
+    walking,
+    cycling,
+    bus,
+    metro,
+    road,
+    ferryRail,
+  };
+  metrics.transit =
+    walking * 0.2 +
+    cycling * 0.12 +
+    bus * 0.28 +
+    metro * 0.25 +
+    road * 0.1 +
+    ferryRail * 0.05;
+  metrics.regionalTransit =
+    zone.metrics.regionalTransit * 0.55 + metro * 0.27 + ferryRail * 0.18;
+
+  Object.entries(regionalContextMetrics).forEach(([key, value]) => {
+    metrics[key] = value;
+  });
   const years = Math.max(0, year - BASE_YEAR);
   metrics.regionalGrowth = Math.max(
     0,
-    Math.min(100, metrics.regionalGrowth + zone.annualGrowth * years * 120),
+    Math.min(100, metrics.regionalGrowth + years * 0.6),
   );
-  return metrics;
+  return { metrics, transportBreakdown };
 }
 
 function weightedScore(metrics: MetricMap, factors: readonly { key: string; weight: number }[]) {
@@ -910,7 +980,11 @@ function housingValue(
   year: number,
   perturbation: Record<string, number> = {},
 ) {
-  const metrics = deriveZoneMetrics(zone, facilities, year);
+  const { metrics, transportBreakdown } = deriveZoneMetrics(
+    zone,
+    facilities,
+    year,
+  );
   const weights = adaptiveWeights(zone.demographics, perturbation);
   const ringScores = Object.fromEntries(
     (["inner", "middle", "outer"] as const).map((ring) => {
@@ -930,20 +1004,27 @@ function housingValue(
   const conflict =
     2.2 * (metrics.care / 100) * (1 - metrics.safety / 100) +
     1.6 * (metrics.green / 100) * zone.risks.pollution;
-  const rawScore =
-    ringScores.inner * housingRingMix.inner +
-    ringScores.middle * housingRingMix.middle +
-    ringScores.outer * housingRingMix.outer +
+  const withinCityRaw =
+    ringScores.inner * (housingRingMix.inner / 0.9) +
+    ringScores.middle * (housingRingMix.middle / 0.9) +
     complementarity -
     conflict;
+  const rawScore =
+    withinCityRaw * 0.9 + ringScores.outer * housingRingMix.outer;
   const multiplier = riskMultiplier(zone.risks);
   return {
     score: Math.max(0, Math.min(100, rawScore * multiplier)),
+    equityScore: Math.max(
+      0,
+      Math.min(100, withinCityRaw * multiplier),
+    ),
     rawScore,
+    withinCityRaw,
     riskMultiplier: multiplier,
     ringScores,
     metrics,
     weights,
+    transportBreakdown,
     interactionEffect: complementarity - conflict,
   };
 }
@@ -1010,6 +1091,7 @@ function candidateToFacility(candidate: GeneratedCandidate): Facility {
     capacity: candidate.capacity,
     quality: candidate.quality,
     openingYear: candidate.openingYear,
+    transportMode: candidate.factor === "transit" ? "bus" : undefined,
   };
 }
 
@@ -1047,8 +1129,8 @@ function evaluatePortfolio(
     );
   }, 0);
   const equityAnnual = housingZones.reduce((sum, zone, index) => {
-    const before = Math.max(0.01, baseModels[index].score / 100);
-    const after = Math.max(0.01, nextModels[index].score / 100);
+    const before = Math.max(0.01, baseModels[index].equityScore / 100);
+    const after = Math.max(0.01, nextModels[index].equityScore / 100);
     const welfareDelta = 2 * Math.sqrt(after) - 2 * Math.sqrt(before);
     return (
       sum +
@@ -1070,17 +1152,22 @@ function evaluatePortfolio(
   const objective =
     (1 - equityShare) * efficiencyBenefit +
     equityShare * equityBenefit -
-    lifecycleCost -
-    robustnessPenalty;
+      lifecycleCost -
+      robustnessPenalty;
   const scores = nextModels.map((model) => model.score);
+  const equityScores = nextModels.map((model) => model.equityScore);
+  const populationWeights = housingZones.map((zone) =>
+    projectedPopulation(zone, year),
+  );
   return {
     scores,
+    equityScores,
     efficiencyBenefit,
     equityBenefit,
     lifecycleCost,
     robustnessPenalty,
     objective,
-    fairness: fairnessIndex(scores),
+    fairness: fairnessIndex(equityScores, populationWeights),
   };
 }
 
@@ -1289,10 +1376,24 @@ function stdDev(values: number[]) {
   return Math.sqrt(variance);
 }
 
-function fairnessIndex(values: number[]) {
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const coefficient = stdDev(values) / mean;
-  return Math.max(0, 100 - coefficient * 310);
+function fairnessIndex(values: number[], weights = values.map(() => 1)) {
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const weightedMean =
+    values.reduce(
+      (sum, value, index) => sum + value * weights[index],
+      0,
+    ) / totalWeight;
+  if (!Number.isFinite(weightedMean) || weightedMean <= 0) return 0;
+  let pairDifference = 0;
+  values.forEach((valueA, indexA) => {
+    values.forEach((valueB, indexB) => {
+      pairDifference +=
+        weights[indexA] * weights[indexB] * Math.abs(valueA - valueB);
+    });
+  });
+  const weightedGini =
+    pairDifference / (2 * totalWeight ** 2 * weightedMean);
+  return Math.max(0, Math.min(100, (1 - weightedGini) * 100));
 }
 
 function formatNumber(value: number) {
@@ -1355,10 +1456,12 @@ export default function Home() {
         ...zone,
         service: model.score,
         score: model.score,
+        equityScore: model.equityScore,
         rawScore: model.rawScore,
         riskMultiplier: model.riskMultiplier,
         metrics: model.metrics,
         weights: model.weights,
+        transportBreakdown: model.transportBreakdown,
         interactionEffect: model.interactionEffect,
         ringScores: model.ringScores,
         priceIndex,
@@ -1367,10 +1470,11 @@ export default function Home() {
     });
   }, [forecastYear]);
 
-  const meanHousingScore =
-    housingScores.reduce((sum, zone) => sum + zone.score, 0) / housingScores.length;
-  const cv = stdDev(housingScores.map((zone) => zone.score)) / meanHousingScore;
-  const fairness = fairnessIndex(housingScores.map((zone) => zone.score));
+  const fairness = fairnessIndex(
+    housingScores.map((zone) => zone.equityScore),
+    housingScores.map((zone) => projectedPopulation(zone, forecastYear)),
+  );
+  const equityGini = 100 - fairness;
 
   const activeHousing =
     housingScores.find((zone) => zone.id === activeHousingId) ?? housingScores[0];
@@ -1811,6 +1915,29 @@ export default function Home() {
             </div>
           )}
 
+          {mode === "housing" && (
+            <div className="transport-breakdown">
+              <div>
+                <span>综合交通构成</span>
+                <b>{activeHousing.metrics.transit.toFixed(0)}</b>
+              </div>
+              {[
+                ["步行", activeHousing.transportBreakdown.walking],
+                ["自行车", activeHousing.transportBreakdown.cycling],
+                ["公交 / BRT", activeHousing.transportBreakdown.bus],
+                ["地铁", activeHousing.transportBreakdown.metro],
+                ["道路驾车", activeHousing.transportBreakdown.road],
+                ["轮渡 / 城际", activeHousing.transportBreakdown.ferryRail],
+              ].map(([label, value]) => (
+                <span key={String(label)}>
+                  <small>{label}</small>
+                  <strong>{Number(value).toFixed(0)}</strong>
+                </span>
+              ))}
+              <p>步行与骑行由街区环境和设施密度推算；公交、BRT、地铁、轮渡由站点容量与距离衰减计算。</p>
+            </div>
+          )}
+
           <button className="model-link" onClick={() => setPanel("model")}>
             <span>ƒ</span>
             <span>
@@ -1844,6 +1971,47 @@ export default function Home() {
             <div className="road road-one" />
             <div className="road road-two" />
             <div className="road road-three" />
+
+            {mode === "housing" && (
+              <div
+                className="transport-network"
+                role="img"
+                aria-label="步行、自行车、公交、BRT、地铁、道路、轮渡与城际交通网络"
+              >
+                <div className="transport-layer local-transport">
+                  <i className="transport-line walk-line walk-a" />
+                  <i className="transport-line walk-line walk-b" />
+                  <i className="transport-line cycle-line cycle-a" />
+                  <i className="transport-line bus-line bus-a" />
+                  <i className="transport-line bus-line bus-b" />
+                  <i className="transport-line metro-line metro-a" />
+                  <span className="transport-stop metro-stop stop-a">M</span>
+                  <span className="transport-stop metro-stop stop-b">M</span>
+                  <span className="transport-stop bus-stop stop-c">B</span>
+                  <span className="route-tag local-tag-a">公交 6 路</span>
+                  <span className="route-tag local-tag-b">骑行绿道</span>
+                  <span className="route-tag local-tag-c">地铁支线</span>
+                </div>
+                <div className="transport-layer city-transport">
+                  <i className="transport-line city-metro city-metro-a" />
+                  <i className="transport-line city-brt city-brt-a" />
+                  <i className="transport-line city-road city-road-a" />
+                  <i className="transport-line city-ferry city-ferry-a" />
+                  <span className="route-tag city-tag-a">地铁 2 / 3 号线</span>
+                  <span className="route-tag city-tag-b">BRT 主走廊</span>
+                  <span className="route-tag city-tag-c">跨海快速路</span>
+                  <span className="route-tag city-tag-d">轮渡航线</span>
+                </div>
+                <div className="transport-layer region-transport">
+                  <i className="transport-line regional-rail regional-rail-a" />
+                  <i className="transport-line regional-road regional-road-a" />
+                  <i className="transport-line regional-road regional-road-b" />
+                  <span className="route-tag region-tag-a">沿海高铁</span>
+                  <span className="route-tag region-tag-b">沈海高速</span>
+                  <span className="route-tag region-tag-c">厦蓉通道</span>
+                </div>
+              </div>
+            )}
 
             {mode === "housing" && (
               <>
@@ -1934,6 +2102,9 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="region-overview" aria-label="福建省与厦漳泉都市圈联系">
+                  <span className="regional-context-note">
+                    湖里区各小区共享此层数值 · 跨城市或新城选址时才产生区分
+                  </span>
                   <span className="region-node fuzhou"><b>福州</b><small>省会资源</small></span>
                   <span className="region-node quanzhou"><b>泉州</b><small>产业与就业</small></span>
                   <span className="region-node xiamen"><b>厦门</b><small>区域门户</small></span>
@@ -1990,12 +2161,28 @@ export default function Home() {
 
             <div className="map-legend">
               {mode === "housing" ? (
-                <>
-                  <span><i className="legend-high" />{currentScale.label}</span>
-                  <span><i className="legend-mid" />当前尺度影响对象</span>
-                  <span><i className="legend-low" />风险与负外部性</span>
-                  <span><i className="legend-proposed" />建议选址</span>
-                </>
+                mapScale === "local" ? (
+                  <>
+                    <span><i className="legend-line walk" />步行支路</span>
+                    <span><i className="legend-line cycle" />自行车绿道</span>
+                    <span><i className="legend-line bus" />公交 / BRT</span>
+                    <span><i className="legend-line metro" />地铁与站点</span>
+                  </>
+                ) : mapScale === "city" ? (
+                  <>
+                    <span><i className="legend-line metro" />地铁</span>
+                    <span><i className="legend-line brt" />BRT</span>
+                    <span><i className="legend-line road" />快速路</span>
+                    <span><i className="legend-line ferry" />跨海轮渡</span>
+                  </>
+                ) : (
+                  <>
+                    <span><i className="legend-line rail" />高铁 / 城际</span>
+                    <span><i className="legend-line road" />高速公路</span>
+                    <span><i className="legend-node" />城市节点</span>
+                    <span><i className="legend-context" />共享区域背景</span>
+                  </>
+                )
               ) : (
                 <>
                   <span><i className="legend-high" />高承载</span>
@@ -2018,10 +2205,10 @@ export default function Home() {
                   </span>
                 </div>
                 <div className="score-stat">
-                  <span>{forecastYear} 年风险后价值</span>
+                  <span>{forecastYear} 年综合居住价值</span>
                   <strong>{activeHousing.score.toFixed(1)}</strong>
                   <small>
-                    原始 {activeHousing.rawScore.toFixed(1)} × 风险 {activeHousing.riskMultiplier.toFixed(2)}
+                    区域背景 {activeHousing.ringScores.outer.toFixed(0)}（同城共享）· 风险 ×{activeHousing.riskMultiplier.toFixed(2)}
                   </small>
                 </div>
                 <div className="score-stat">
@@ -2088,7 +2275,7 @@ export default function Home() {
           <section className="fairness-card">
             <div className="fairness-top">
               <span>
-                <small>{mode === "housing" ? "全域公平指数" : "场馆准备度"}</small>
+                <small>{mode === "housing" ? "区内设施公平指数" : "场馆准备度"}</small>
                 <strong>{mode === "housing" ? fairness.toFixed(1) : capacityRate.toFixed(1)}</strong>
               </span>
               <div
@@ -2114,7 +2301,7 @@ export default function Home() {
             </div>
             <p>
               {mode === "housing"
-                ? `当前区域变异系数 ${(cv * 100).toFixed(1)}%。评分已按各社区人口结构调整权重，并由洪涝、污染等风险整体折价。`
+                ? `采用人口加权 Gini 互补指数；当前不平等度 ${equityGini.toFixed(1)}%。同一区共享的区域背景不参与小区公平比较，避免把共同加分误当成均衡改善。`
                 : `${matchScenarios[matchScenario].label}预计到场 ${formatNumber(cupBaseline.demand.spectators)} 人；${cupBaseline.bottleneck}是当前最弱需求链。`}
             </p>
           </section>
@@ -2378,13 +2565,21 @@ export default function Home() {
                     <div className="formula">
                       A<sub>ikt</sub> = Sigmoid[ Σ C<sub>j</sub>Q<sub>j</sub>f(d<sub>ij</sub>)δ<sub>jt</sub> / D<sub>it</sub> ]
                       <br />
-                      V<sub>it</sub> = [0.70L + 0.20M + 0.10O + I] × m(R)
+                      U<sub>it</sub> = 0.778L + 0.222M + I
+                      <br />
+                      V<sub>it</sub> = [0.90U<sub>it</sub> + 0.10C<sub>region,t</sub>] × m(R<sub>i</sub>)
                     </div>
                     <div className="model-grid">
                       <article><b>空间供需 A</b><p>设施以坐标、容量、品质和投用年份记录。医疗等使用高斯衰减，公交使用指数衰减，商业等使用重力衰减；Sigmoid 自动体现饱和效应。</p></article>
                       <article><b>非线性交互 I</b><p>医疗×公交、教育×绿地、岗位×轨道形成互补奖励；养老服务与低安全、绿地与污染暴露形成冲突惩罚。</p></article>
                       <article><b>人口自适应权重</b><p>老年、儿童与劳动年龄人口按偏好向量混合，并在各空间层内重新归一化。因此同一设施对不同社区的价值不同。</p></article>
                       <article><b>时间与风险 m(R)</b><p>人口按社区增长率预测，规划设施按投用年折现；地质、洪涝、污染、工业和噪声合成为 0.3–1.0 的整体价值乘数。</p></article>
+                      <article><b>六类交通构成</b><p>综合交通由步行20%、自行车12%、公交/BRT 28%、地铁25%、道路驾车10%、轮渡/城际5%组成；各站点仍按容量和距离衰减。</p></article>
+                      <article><b>公平口径</b><p>F = 100 × (1 − 人口加权Gini)。它只比较区内服务 U×风险，不包含所有湖里小区都相同的区域背景。</p></article>
+                    </div>
+                    <div className="regional-rule">
+                      <b>区域层为什么保留</b>
+                      <p>在湖里区内部，它是所有小区共享的背景常数，不负责区分小区，也不进入区内公平排序。它只在比较厦门与其他城市、评估廊坊受北京—天津影响、选择跨城市新住区，或模拟区域政策与气候变化时产生辨别力。</p>
                     </div>
                     <div className="price-rule">
                       <b>房价不进入 V</b>
