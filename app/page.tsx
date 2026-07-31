@@ -46,16 +46,73 @@ type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
 type HousingRing = "inner" | "middle" | "outer";
 type MapScale = "local" | "city" | "region";
+type Coord = { lat: number; lng: number };
+type DecayType = "gaussian" | "exponential" | "gravity";
+
+type Demographics = {
+  elderlyRatio: number;
+  childRatio: number;
+  workingAgeRatio: number;
+  avgIncome: number;
+};
+
+type RiskProfile = {
+  geological: number;
+  flood: number;
+  pollution: number;
+  industrial: number;
+  noise: number;
+};
 
 type HousingZone = {
   id: string;
   name: string;
   subtitle: string;
+  coord: Coord;
   population: number;
+  annualGrowth: number;
+  demographics: Demographics;
   price: number;
   priceReason: string;
-  risk: number;
+  risks: RiskProfile;
   metrics: MetricMap;
+};
+
+type Facility = Coord & {
+  id: string;
+  type: string;
+  name: string;
+  capacity: number;
+  quality: number;
+  openingYear: number;
+};
+
+type LandParcel = {
+  id: string;
+  name: string;
+  center: Coord;
+  area: number;
+  landPrice: number;
+  landUse: "vacant" | "industrial_renewal" | "brownfield" | "greenfield";
+  zoningAllowed: string[];
+  demolitionDifficulty: number;
+  policyCertainty: number;
+  risk: number;
+};
+
+type GeneratedCandidate = {
+  id: string;
+  parcelId: string;
+  parcelName: string;
+  factor: string;
+  facility: string;
+  center: Coord;
+  capacity: number;
+  quality: number;
+  openingYear: number;
+  cost: number;
+  robustness: number;
+  nearestZoneId: string;
 };
 
 type Stadium = {
@@ -73,6 +130,22 @@ type Stadium = {
   };
 };
 
+type MatchScenarioKey = "group" | "knockout" | "final";
+
+type StadiumIntervention = {
+  id: string;
+  appliesTo: string[];
+  type: string;
+  title: string;
+  place: string;
+  cost: number;
+  constructionYears: number;
+  capacityGain: Partial<Stadium["limits"]>;
+  legacyAnnualValue: number;
+  reuseRate: number;
+  idlenessRisk: number;
+};
+
 type Recommendation = {
   rank: number;
   type: string;
@@ -82,6 +155,16 @@ type Recommendation = {
   detail: string;
   score: number;
   tone: "lime" | "coral" | "blue";
+};
+
+type PortfolioEvaluation = {
+  scores: number[];
+  efficiencyBenefit: number;
+  equityBenefit: number;
+  lifecycleCost: number;
+  robustnessPenalty: number;
+  objective: number;
+  fairness: number;
 };
 
 type ChatMessage = {
@@ -222,10 +305,13 @@ const housingZones: HousingZone[] = [
     id: "beiyuan",
     name: "北园新城",
     subtitle: "高密居住 · 老少比 0.41",
+    coord: { lat: 24.535, lng: 118.13 },
     population: 8.6,
+    annualGrowth: 0.018,
+    demographics: { elderlyRatio: 0.12, childRatio: 0.14, workingAgeRatio: 0.69, avgIncome: 0.82 },
     price: 4.2,
     priceReason: "次新房供给偏少、开发商品牌和学区预期形成市场溢价，房价高于公共服务模型所能解释的部分。",
-    risk: 2,
+    risks: { geological: 0.08, flood: 0.12, pollution: 0.08, industrial: 0.1, noise: 0.22 },
     metrics: {
       medical: 82,
       education: 76,
@@ -260,10 +346,13 @@ const housingZones: HousingZone[] = [
     id: "hewan",
     name: "河湾社区",
     subtitle: "滨水住区 · 老龄化 22%",
+    coord: { lat: 24.512, lng: 118.105 },
     population: 6.2,
+    annualGrowth: 0.004,
+    demographics: { elderlyRatio: 0.22, childRatio: 0.1, workingAgeRatio: 0.61, avgIncome: 0.63 },
     price: 3.1,
     priceReason: "滨水景观带来一定价格支撑，但养老医疗与跨区通勤较弱；景观溢价掩盖了日常服务缺口。",
-    risk: 4,
+    risks: { geological: 0.1, flood: 0.48, pollution: 0.12, industrial: 0.08, noise: 0.16 },
     metrics: {
       medical: 49,
       education: 61,
@@ -298,10 +387,13 @@ const housingZones: HousingZone[] = [
     id: "donggang",
     name: "东港里",
     subtitle: "产城混合 · 通勤人口多",
+    coord: { lat: 24.49, lng: 118.165 },
     population: 7.4,
+    annualGrowth: 0.026,
+    demographics: { elderlyRatio: 0.09, childRatio: 0.13, workingAgeRatio: 0.73, avgIncome: 0.71 },
     price: 2.7,
     priceReason: "岗位与规划利好尚未充分资本化；传统工业印象、绿地短缺和风险感知压低成交价，因此模型价值高于市场价格。",
-    risk: 7,
+    risks: { geological: 0.06, flood: 0.24, pollution: 0.58, industrial: 0.64, noise: 0.42 },
     metrics: {
       medical: 42,
       education: 46,
@@ -336,10 +428,13 @@ const housingZones: HousingZone[] = [
     id: "nanhu",
     name: "南湖家园",
     subtitle: "成熟住区 · 儿童占比 18%",
+    coord: { lat: 24.501, lng: 118.134 },
     population: 5.8,
+    annualGrowth: 0.01,
+    demographics: { elderlyRatio: 0.13, childRatio: 0.18, workingAgeRatio: 0.64, avgIncome: 0.74 },
     price: 3.7,
     priceReason: "教育、公园和基层服务共同支撑房价，市场价格与模型价值基本一致，偏差处于可接受范围。",
-    risk: 1,
+    risks: { geological: 0.05, flood: 0.08, pollution: 0.06, industrial: 0.05, noise: 0.12 },
     metrics: {
       medical: 75,
       education: 91,
@@ -374,10 +469,13 @@ const housingZones: HousingZone[] = [
     id: "xicheng",
     name: "西城旧里",
     subtitle: "存量更新 · 建成 28 年",
+    coord: { lat: 24.521, lng: 118.083 },
     population: 9.1,
+    annualGrowth: -0.003,
+    demographics: { elderlyRatio: 0.19, childRatio: 0.1, workingAgeRatio: 0.62, avgIncome: 0.6 },
     price: 3.4,
     priceReason: "商业、餐饮与公交成熟支撑价格，但老旧住房品质和公园托育短板抵消了区位优势，房价与模型值接近。",
-    risk: 5,
+    risks: { geological: 0.08, flood: 0.18, pollution: 0.32, industrial: 0.28, noise: 0.45 },
     metrics: {
       medical: 67,
       education: 72,
@@ -470,6 +568,120 @@ const stadiums: Stadium[] = [
   },
 ];
 
+const matchScenarios: Record<
+  MatchScenarioKey,
+  {
+    label: string;
+    attendanceRate: number;
+    internationalRatio: number;
+    domesticVisitorRatio: number;
+    simultaneousLoad: number;
+  }
+> = {
+  group: {
+    label: "小组赛 · 双场并发",
+    attendanceRate: 0.74,
+    internationalRatio: 0.14,
+    domesticVisitorRatio: 0.34,
+    simultaneousLoad: 1.22,
+  },
+  knockout: {
+    label: "淘汰赛 · 单场高峰",
+    attendanceRate: 0.91,
+    internationalRatio: 0.28,
+    domesticVisitorRatio: 0.4,
+    simultaneousLoad: 1,
+  },
+  final: {
+    label: "决赛 · 国际客流峰值",
+    attendanceRate: 1,
+    internationalRatio: 0.48,
+    domesticVisitorRatio: 0.34,
+    simultaneousLoad: 1,
+  },
+};
+
+const stadiumInterventions: StadiumIntervention[] = [
+  {
+    id: "hotel-cluster",
+    appliesTo: ["linhai", "longcheng"],
+    type: "住宿集群",
+    title: "建设可转换赛事旅馆组团",
+    place: "临港站东侧 · 轨道共址地块",
+    cost: 2.35,
+    constructionYears: 3,
+    capacityGain: { 住宿: 9200, 餐饮: 2800 },
+    legacyAnnualValue: 0.24,
+    reuseRate: 0.88,
+    idlenessRisk: 0.18,
+  },
+  {
+    id: "modular-lodging",
+    appliesTo: ["linhai", "huanqiu"],
+    type: "临时住宿",
+    title: "部署模块化住宿与赛后人才公寓",
+    place: "场馆北侧综合开发单元",
+    cost: 1.08,
+    constructionYears: 1,
+    capacityGain: { 住宿: 4800, 公卫: 1800 },
+    legacyAnnualValue: 0.11,
+    reuseRate: 0.81,
+    idlenessRisk: 0.24,
+  },
+  {
+    id: "park-ride",
+    appliesTo: ["linhai", "longcheng", "huanqiu"],
+    type: "交通疏散",
+    title: "设置 P+R 接驳与三向离场通道",
+    place: "城市外环 · 综合交通廊道",
+    cost: 0.86,
+    constructionYears: 2,
+    capacityGain: { 交通: 16500, 公卫: 1200 },
+    legacyAnnualValue: 0.09,
+    reuseRate: 0.92,
+    idlenessRisk: 0.1,
+  },
+  {
+    id: "medical-hub",
+    appliesTo: ["linhai", "huanqiu"],
+    type: "医疗急救",
+    title: "扩建区域急救与赛事医疗中心",
+    place: "场馆东南 · 15 分钟急救圈",
+    cost: 1.26,
+    constructionYears: 2,
+    capacityGain: { 医疗: 7600, 公卫: 2200 },
+    legacyAnnualValue: 0.18,
+    reuseRate: 0.95,
+    idlenessRisk: 0.07,
+  },
+  {
+    id: "fan-zone",
+    appliesTo: ["linhai", "longcheng", "huanqiu"],
+    type: "餐饮与公卫",
+    title: "建设可拆装球迷广场",
+    place: "场馆步行圈 · 商业预留地",
+    cost: 0.48,
+    constructionYears: 1,
+    capacityGain: { 餐饮: 9800, 公卫: 7200 },
+    legacyAnnualValue: 0.045,
+    reuseRate: 0.74,
+    idlenessRisk: 0.28,
+  },
+  {
+    id: "egress-upgrade",
+    appliesTo: ["longcheng", "huanqiu"],
+    type: "场馆改造",
+    title: "改造分区闸机与步行疏散系统",
+    place: "场馆红线内 · 东西看台",
+    cost: 0.72,
+    constructionYears: 1,
+    capacityGain: { 交通: 4800, 公卫: 3500 },
+    legacyAnnualValue: 0.06,
+    reuseRate: 0.9,
+    idlenessRisk: 0.09,
+  },
+];
+
 const housingMarkers = [
   { x: 18, y: 22, icon: "医", label: "社区医院", tone: "coral", ring: "inner" },
   { x: 34, y: 58, icon: "学", label: "实验小学", tone: "blue", ring: "inner" },
@@ -492,17 +704,197 @@ const cupMarkers = [
   { x: 79, y: 72, icon: "医", label: "赛事医院", tone: "coral", ring: "middle" },
 ];
 
-const sitingCandidates = [
-  { zoneId: "donggang", factor: "medical", facility: "社区卫生服务中心", parcel: "东南生活圈 E-12", cost: 0.82, boost: 38, robustness: 95 },
-  { zoneId: "donggang", factor: "green", facility: "带状社区公园", parcel: "工业支路更新地块 G-04", cost: 0.64, boost: 34, robustness: 88 },
-  { zoneId: "donggang", factor: "education", facility: "九年一贯制学校", parcel: "轨道站西北地块 S-09", cost: 1.76, boost: 36, robustness: 84 },
-  { zoneId: "hewan", factor: "care", facility: "养老托育复合站", parcel: "滨河路口 C-03", cost: 0.46, boost: 42, robustness: 92 },
-  { zoneId: "hewan", factor: "regionalTransit", facility: "社区接驳枢纽", parcel: "河湾大道 T-08", cost: 0.71, boost: 31, robustness: 86 },
-  { zoneId: "xicheng", factor: "green", facility: "口袋公园组团", parcel: "旧厂院更新地块 G-11", cost: 0.38, boost: 29, robustness: 91 },
-  { zoneId: "xicheng", factor: "care", facility: "嵌入式托育中心", parcel: "西城市场北侧 C-06", cost: 0.29, boost: 35, robustness: 90 },
-  { zoneId: "beiyuan", factor: "culture", facility: "社区文化中心", parcel: "北园中轴 P-02", cost: 0.55, boost: 26, robustness: 82 },
-  { zoneId: "nanhu", factor: "employment", facility: "社区共享办公站", parcel: "南湖轨道上盖 J-05", cost: 0.34, boost: 24, robustness: 79 },
-] as const;
+const BASE_YEAR = 2026;
+const DISCOUNT_RATE = 0.04;
+const ANNUAL_VALUE_PER_CAPITA = 0.65;
+
+const facilityTypeConfig: Record<
+  string,
+  {
+    label: string;
+    capacityReference: number;
+    defaultCapacity: number;
+    sigma: number;
+    decay: DecayType;
+    threshold: number;
+    scale: number;
+    serviceRadius: number;
+    constructionYears: number;
+    buildCost: number;
+    annualOpex: number;
+  }
+> = {
+  medical: { label: "社区卫生服务中心", capacityReference: 2500, defaultCapacity: 3600, sigma: 1.25, decay: "gaussian", threshold: 0.72, scale: 0.28, serviceRadius: 5, constructionYears: 2, buildCost: 0.42, annualOpex: 0.018 },
+  education: { label: "九年一贯制学校", capacityReference: 1200, defaultCapacity: 1800, sigma: 1.05, decay: "gaussian", threshold: 0.78, scale: 0.27, serviceRadius: 4, constructionYears: 3, buildCost: 0.92, annualOpex: 0.026 },
+  transit: { label: "社区公交接驳枢纽", capacityReference: 4200, defaultCapacity: 7200, sigma: 1.6, decay: "exponential", threshold: 0.7, scale: 0.3, serviceRadius: 6, constructionYears: 2, buildCost: 0.34, annualOpex: 0.022 },
+  care: { label: "养老托育复合站", capacityReference: 300, defaultCapacity: 520, sigma: 0.85, decay: "gaussian", threshold: 0.68, scale: 0.26, serviceRadius: 3, constructionYears: 1, buildCost: 0.2, annualOpex: 0.014 },
+  retail: { label: "社区邻里中心", capacityReference: 7000, defaultCapacity: 10500, sigma: 0.8, decay: "gravity", threshold: 0.82, scale: 0.3, serviceRadius: 3, constructionYears: 1, buildCost: 0.28, annualOpex: 0.01 },
+  green: { label: "社区公园组团", capacityReference: 2.4, defaultCapacity: 4.2, sigma: 1.1, decay: "gaussian", threshold: 0.7, scale: 0.28, serviceRadius: 4, constructionYears: 1, buildCost: 0.13, annualOpex: 0.005 },
+  culture: { label: "社区文化中心", capacityReference: 900, defaultCapacity: 1500, sigma: 1.1, decay: "gravity", threshold: 0.76, scale: 0.3, serviceRadius: 4, constructionYears: 2, buildCost: 0.24, annualOpex: 0.009 },
+  dining: { label: "社区餐饮集市", capacityReference: 950, defaultCapacity: 1600, sigma: 0.75, decay: "exponential", threshold: 0.72, scale: 0.3, serviceRadius: 2.5, constructionYears: 1, buildCost: 0.12, annualOpex: 0.006 },
+  safety: { label: "社区安全服务站", capacityReference: 1, defaultCapacity: 1, sigma: 1.5, decay: "gravity", threshold: 0.62, scale: 0.25, serviceRadius: 5, constructionYears: 1, buildCost: 0.1, annualOpex: 0.008 },
+};
+
+const existingFacilities: Facility[] = [
+  { id: "m-01", type: "medical", name: "北园社区医院", lat: 24.536, lng: 118.126, capacity: 3100, quality: 0.88, openingYear: 2018 },
+  { id: "m-02", type: "medical", name: "南湖卫生中心", lat: 24.503, lng: 118.136, capacity: 2700, quality: 0.9, openingYear: 2016 },
+  { id: "m-03", type: "medical", name: "西城门诊部", lat: 24.52, lng: 118.089, capacity: 1800, quality: 0.76, openingYear: 2012 },
+  { id: "e-01", type: "education", name: "北园实验学校", lat: 24.532, lng: 118.134, capacity: 1650, quality: 0.9, openingYear: 2020 },
+  { id: "e-02", type: "education", name: "南湖小学", lat: 24.499, lng: 118.131, capacity: 1450, quality: 0.94, openingYear: 2015 },
+  { id: "e-03", type: "education", name: "河湾学校", lat: 24.516, lng: 118.111, capacity: 980, quality: 0.78, openingYear: 2011 },
+  { id: "t-01", type: "transit", name: "北园公交中心", lat: 24.53, lng: 118.128, capacity: 6600, quality: 0.92, openingYear: 2019 },
+  { id: "t-02", type: "transit", name: "南湖换乘站", lat: 24.505, lng: 118.139, capacity: 5800, quality: 0.87, openingYear: 2017 },
+  { id: "t-03", type: "transit", name: "东港支线站", lat: 24.493, lng: 118.16, capacity: 4700, quality: 0.8, openingYear: 2023 },
+  { id: "t-04", type: "transit", name: "河湾轨道站（规划）", lat: 24.514, lng: 118.102, capacity: 8200, quality: 0.94, openingYear: 2029 },
+  { id: "c-01", type: "care", name: "北园托育中心", lat: 24.538, lng: 118.132, capacity: 280, quality: 0.84, openingYear: 2021 },
+  { id: "c-02", type: "care", name: "南湖养老服务站", lat: 24.5, lng: 118.128, capacity: 360, quality: 0.88, openingYear: 2019 },
+  { id: "c-03", type: "care", name: "西城日间照料站", lat: 24.519, lng: 118.087, capacity: 190, quality: 0.72, openingYear: 2014 },
+  { id: "r-01", type: "retail", name: "北园邻里中心", lat: 24.533, lng: 118.129, capacity: 9300, quality: 0.9, openingYear: 2019 },
+  { id: "r-02", type: "retail", name: "河湾生鲜市集", lat: 24.51, lng: 118.109, capacity: 7200, quality: 0.82, openingYear: 2016 },
+  { id: "r-03", type: "retail", name: "西城综合市场", lat: 24.522, lng: 118.08, capacity: 10600, quality: 0.8, openingYear: 2008 },
+  { id: "r-04", type: "retail", name: "东港便民中心", lat: 24.494, lng: 118.167, capacity: 4300, quality: 0.7, openingYear: 2022 },
+  { id: "g-01", type: "green", name: "河湾滨水公园", lat: 24.511, lng: 118.102, capacity: 5.8, quality: 0.96, openingYear: 2018 },
+  { id: "g-02", type: "green", name: "南湖中央公园", lat: 24.497, lng: 118.137, capacity: 4.5, quality: 0.92, openingYear: 2013 },
+  { id: "g-03", type: "green", name: "北园街心公园", lat: 24.539, lng: 118.125, capacity: 2.1, quality: 0.82, openingYear: 2021 },
+  { id: "u-01", type: "culture", name: "南湖文化馆", lat: 24.504, lng: 118.13, capacity: 1350, quality: 0.9, openingYear: 2017 },
+  { id: "u-02", type: "culture", name: "西城图书馆", lat: 24.519, lng: 118.079, capacity: 920, quality: 0.84, openingYear: 2010 },
+  { id: "d-01", type: "dining", name: "西城餐饮街", lat: 24.52, lng: 118.086, capacity: 2100, quality: 0.86, openingYear: 2012 },
+  { id: "d-02", type: "dining", name: "北园生活街", lat: 24.534, lng: 118.136, capacity: 1700, quality: 0.88, openingYear: 2020 },
+  { id: "d-03", type: "dining", name: "东港夜市", lat: 24.488, lng: 118.161, capacity: 1250, quality: 0.72, openingYear: 2019 },
+  { id: "s-01", type: "safety", name: "北园警务站", lat: 24.531, lng: 118.127, capacity: 1, quality: 0.92, openingYear: 2018 },
+  { id: "s-02", type: "safety", name: "南湖消防站", lat: 24.506, lng: 118.14, capacity: 1, quality: 0.95, openingYear: 2015 },
+  { id: "s-03", type: "safety", name: "西城警务站", lat: 24.521, lng: 118.085, capacity: 1, quality: 0.82, openingYear: 2011 },
+];
+
+const landParcels: LandParcel[] = [
+  { id: "E-12", name: "东南生活圈 E-12", center: { lat: 24.487, lng: 118.158 }, area: 1.4, landPrice: 285, landUse: "vacant", zoningAllowed: ["medical", "care", "retail"], demolitionDifficulty: 0.08, policyCertainty: 0.93, risk: 0.16 },
+  { id: "G-04", name: "工业支路更新 G-04", center: { lat: 24.496, lng: 118.154 }, area: 2.2, landPrice: 210, landUse: "industrial_renewal", zoningAllowed: ["green", "culture", "transit"], demolitionDifficulty: 0.38, policyCertainty: 0.86, risk: 0.29 },
+  { id: "S-09", name: "轨道站西北 S-09", center: { lat: 24.5, lng: 118.151 }, area: 2.6, landPrice: 330, landUse: "greenfield", zoningAllowed: ["education", "medical", "transit"], demolitionDifficulty: 0.12, policyCertainty: 0.9, risk: 0.13 },
+  { id: "C-03", name: "滨河路口 C-03", center: { lat: 24.513, lng: 118.101 }, area: 0.9, landPrice: 360, landUse: "vacant", zoningAllowed: ["care", "medical", "culture"], demolitionDifficulty: 0.1, policyCertainty: 0.91, risk: 0.27 },
+  { id: "T-08", name: "河湾大道 T-08", center: { lat: 24.517, lng: 118.113 }, area: 1.3, landPrice: 310, landUse: "greenfield", zoningAllowed: ["transit", "retail", "safety"], demolitionDifficulty: 0.09, policyCertainty: 0.88, risk: 0.21 },
+  { id: "G-11", name: "旧厂院更新 G-11", center: { lat: 24.522, lng: 118.091 }, area: 1.7, landPrice: 245, landUse: "brownfield", zoningAllowed: ["green", "care", "culture"], demolitionDifficulty: 0.44, policyCertainty: 0.82, risk: 0.35 },
+  { id: "P-02", name: "北园中轴 P-02", center: { lat: 24.537, lng: 118.14 }, area: 1.1, landPrice: 440, landUse: "vacant", zoningAllowed: ["culture", "education", "green"], demolitionDifficulty: 0.06, policyCertainty: 0.94, risk: 0.09 },
+  { id: "J-05", name: "南湖轨道上盖 J-05", center: { lat: 24.506, lng: 118.145 }, area: 0.8, landPrice: 510, landUse: "vacant", zoningAllowed: ["retail", "dining", "care"], demolitionDifficulty: 0.15, policyCertainty: 0.96, risk: 0.08 },
+  { id: "W-07", name: "西城更新单元 W-07", center: { lat: 24.525, lng: 118.076 }, area: 1.2, landPrice: 385, landUse: "industrial_renewal", zoningAllowed: ["green", "education", "safety"], demolitionDifficulty: 0.32, policyCertainty: 0.79, risk: 0.24 },
+];
+
+const preferenceProfiles: Record<string, Record<string, number>> = {
+  elderly: { medical: 1.8, care: 2, green: 1.3, transit: 1.2, retail: 1.1 },
+  family: { education: 2, green: 1.5, safety: 1.4, care: 1.3, retail: 1.2 },
+  youngWorker: { transit: 1.6, dining: 1.5, digital: 1.4, employment: 1.3, commerce: 1.2 },
+};
+
+function annuityFactor(years: number, rate = DISCOUNT_RATE) {
+  return (1 - (1 + rate) ** -years) / rate;
+}
+
+function haversine(a: Coord, b: Coord) {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const earthRadius = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(h));
+}
+
+function decay(distanceKm: number, type: DecayType, sigma: number) {
+  if (type === "exponential") return Math.exp(-distanceKm / sigma);
+  if (type === "gravity") return 1 / (1 + (distanceKm / sigma) ** 2);
+  return Math.exp(-0.5 * (distanceKm / sigma) ** 2);
+}
+
+function projectedPopulation(zone: HousingZone, year: number) {
+  return zone.population * (1 + zone.annualGrowth) ** Math.max(0, year - BASE_YEAR);
+}
+
+function facilityScore(
+  zone: HousingZone,
+  facilities: Facility[],
+  type: string,
+  year: number,
+) {
+  const config = facilityTypeConfig[type];
+  if (!config) return zone.metrics[type] ?? 0;
+  const demandGrowth = projectedPopulation(zone, year) / zone.population;
+  const raw = facilities
+    .filter((facility) => facility.type === type && facility.openingYear <= year)
+    .reduce((sum, facility) => {
+      const distance = haversine(zone.coord, facility);
+      const timeDiscount =
+        1 / (1 + DISCOUNT_RATE) ** Math.max(0, facility.openingYear - BASE_YEAR);
+      return (
+        sum +
+        (facility.capacity / config.capacityReference) *
+          facility.quality *
+          decay(distance, config.decay, config.sigma) *
+          timeDiscount
+      );
+    }, 0) / demandGrowth;
+  return Math.max(
+    0,
+    Math.min(100, 100 / (1 + Math.exp(-(raw - config.threshold) / config.scale))),
+  );
+}
+
+function adaptiveWeights(
+  demographics: Demographics,
+  perturbation: Record<string, number> = {},
+) {
+  const raw = Object.fromEntries(
+    housingFactors.map((factor) => {
+      const elderly = preferenceProfiles.elderly[factor.key] ?? 1;
+      const family = preferenceProfiles.family[factor.key] ?? 1;
+      const worker = preferenceProfiles.youngWorker[factor.key] ?? 1;
+      const multiplier =
+        1 +
+        demographics.elderlyRatio * (elderly - 1) +
+        demographics.childRatio * (family - 1) +
+        demographics.workingAgeRatio * 0.35 * (worker - 1);
+      return [factor.key, factor.weight * multiplier * (perturbation[factor.key] ?? 1)];
+    }),
+  );
+  for (const ring of ["inner", "middle", "outer"] as const) {
+    const factors = housingFactors.filter((factor) => factor.ring === ring);
+    const baseTotal = factors.reduce((sum, factor) => sum + factor.weight, 0);
+    const adaptiveTotal = factors.reduce((sum, factor) => sum + raw[factor.key], 0);
+    factors.forEach((factor) => {
+      raw[factor.key] *= baseTotal / adaptiveTotal;
+    });
+  }
+  return raw;
+}
+
+function riskMultiplier(risks: RiskProfile) {
+  const ordered = Object.values(risks).sort((a, b) => b - a);
+  const combinedRisk = Math.min(
+    1,
+    ordered[0] + ordered.slice(1).reduce((sum, risk) => sum + risk * 0.3, 0),
+  );
+  return 1 - combinedRisk * 0.7;
+}
+
+function deriveZoneMetrics(
+  zone: HousingZone,
+  facilities: Facility[],
+  year: number,
+) {
+  const metrics = { ...zone.metrics };
+  housingFactors
+    .filter((factor) => factor.ring === "inner")
+    .forEach((factor) => {
+      metrics[factor.key] = facilityScore(zone, facilities, factor.key, year);
+    });
+  const years = Math.max(0, year - BASE_YEAR);
+  metrics.regionalGrowth = Math.max(
+    0,
+    Math.min(100, metrics.regionalGrowth + zone.annualGrowth * years * 120),
+  );
+  return metrics;
+}
 
 function weightedScore(metrics: MetricMap, factors: readonly { key: string; weight: number }[]) {
   const total = factors.reduce((sum, factor) => sum + factor.weight, 0);
@@ -512,27 +904,382 @@ function weightedScore(metrics: MetricMap, factors: readonly { key: string; weig
   ) / total;
 }
 
-function housingValue(metrics: MetricMap, risk: number) {
-  const ringScores = {
-    inner: weightedScore(
-      metrics,
-      housingFactors.filter((factor) => factor.ring === "inner"),
-    ),
-    middle: weightedScore(
-      metrics,
-      housingFactors.filter((factor) => factor.ring === "middle"),
-    ),
-    outer: weightedScore(
-      metrics,
-      housingFactors.filter((factor) => factor.ring === "outer"),
-    ),
-  };
-  const score =
+function housingValue(
+  zone: HousingZone,
+  facilities: Facility[],
+  year: number,
+  perturbation: Record<string, number> = {},
+) {
+  const metrics = deriveZoneMetrics(zone, facilities, year);
+  const weights = adaptiveWeights(zone.demographics, perturbation);
+  const ringScores = Object.fromEntries(
+    (["inner", "middle", "outer"] as const).map((ring) => {
+      const factors = housingFactors.filter((factor) => factor.ring === ring);
+      const total = factors.reduce((sum, factor) => sum + weights[factor.key], 0);
+      const score = factors.reduce(
+        (sum, factor) => sum + metrics[factor.key] * weights[factor.key],
+        0,
+      ) / total;
+      return [ring, score];
+    }),
+  ) as Record<HousingRing, number>;
+  const complementarity =
+    3.2 * (metrics.medical / 100) * (metrics.transit / 100) +
+    2.4 * (metrics.education / 100) * (metrics.green / 100) +
+    1.8 * (metrics.employment / 100) * (metrics.regionalTransit / 100);
+  const conflict =
+    2.2 * (metrics.care / 100) * (1 - metrics.safety / 100) +
+    1.6 * (metrics.green / 100) * zone.risks.pollution;
+  const rawScore =
     ringScores.inner * housingRingMix.inner +
     ringScores.middle * housingRingMix.middle +
-    ringScores.outer * housingRingMix.outer -
-    risk;
-  return { score: Math.max(0, score), ringScores };
+    ringScores.outer * housingRingMix.outer +
+    complementarity -
+    conflict;
+  const multiplier = riskMultiplier(zone.risks);
+  return {
+    score: Math.max(0, Math.min(100, rawScore * multiplier)),
+    rawScore,
+    riskMultiplier: multiplier,
+    ringScores,
+    metrics,
+    weights,
+    interactionEffect: complementarity - conflict,
+  };
+}
+
+function estimateLifecycleCost(parcel: LandParcel, factor: string) {
+  const config = facilityTypeConfig[factor];
+  const landCost = (parcel.landPrice * parcel.area * 15) / 10000;
+  const renewalMultiplier =
+    parcel.landUse === "brownfield"
+      ? 1.22
+      : parcel.landUse === "industrial_renewal"
+        ? 1.12
+        : 1;
+  return (
+    landCost +
+    config.buildCost * renewalMultiplier +
+    config.annualOpex * annuityFactor(20)
+  );
+}
+
+function generateCandidates(
+  parcels: LandParcel[],
+  zones: HousingZone[],
+): GeneratedCandidate[] {
+  return parcels.flatMap((parcel) =>
+    parcel.zoningAllowed.flatMap((factor) => {
+      const config = facilityTypeConfig[factor];
+      if (!config) return [];
+      const nearest = [...zones].sort(
+        (a, b) =>
+          haversine(a.coord, parcel.center) - haversine(b.coord, parcel.center),
+      )[0];
+      if (haversine(nearest.coord, parcel.center) > config.serviceRadius) return [];
+      const robustness =
+        100 *
+        (0.45 * (1 - parcel.risk) +
+          0.3 * parcel.policyCertainty +
+          0.25 * (1 - parcel.demolitionDifficulty));
+      return [{
+        id: `${parcel.id}-${factor}`,
+        parcelId: parcel.id,
+        parcelName: parcel.name,
+        factor,
+        facility: config.label,
+        center: parcel.center,
+        capacity: config.defaultCapacity,
+        quality: 0.9,
+        openingYear: BASE_YEAR + config.constructionYears,
+        cost: estimateLifecycleCost(parcel, factor),
+        robustness,
+        nearestZoneId: nearest.id,
+      }];
+    }),
+  );
+}
+
+function candidateToFacility(candidate: GeneratedCandidate): Facility {
+  return {
+    id: candidate.id,
+    type: candidate.factor,
+    name: candidate.facility,
+    lat: candidate.center.lat,
+    lng: candidate.center.lng,
+    capacity: candidate.capacity,
+    quality: candidate.quality,
+    openingYear: candidate.openingYear,
+  };
+}
+
+function cvar90(candidate: GeneratedCandidate) {
+  const exposure = 1 - candidate.robustness / 100;
+  const losses = [0.45, 0.7, 0.95, 1.25, 1.6]
+    .map((shock) => candidate.cost * exposure * shock)
+    .sort((a, b) => b - a);
+  return (losses[0] + losses[1]) / 2;
+}
+
+function evaluatePortfolio(
+  selected: GeneratedCandidate[],
+  year: number,
+  equityShare: number,
+  perturbation: Record<string, number> = {},
+): PortfolioEvaluation {
+  const nextFacilities = [
+    ...existingFacilities,
+    ...selected.map(candidateToFacility),
+  ];
+  const baseModels = housingZones.map((zone) =>
+    housingValue(zone, existingFacilities, year, perturbation),
+  );
+  const nextModels = housingZones.map((zone) =>
+    housingValue(zone, nextFacilities, year, perturbation),
+  );
+  const benefitYears = Math.max(8, 20 - Math.max(0, year - BASE_YEAR));
+  const benefitPv = annuityFactor(benefitYears);
+  const efficiencyAnnual = housingZones.reduce((sum, zone, index) => {
+    const delta = (nextModels[index].score - baseModels[index].score) / 100;
+    return (
+      sum +
+      projectedPopulation(zone, year) * ANNUAL_VALUE_PER_CAPITA * delta
+    );
+  }, 0);
+  const equityAnnual = housingZones.reduce((sum, zone, index) => {
+    const before = Math.max(0.01, baseModels[index].score / 100);
+    const after = Math.max(0.01, nextModels[index].score / 100);
+    const welfareDelta = 2 * Math.sqrt(after) - 2 * Math.sqrt(before);
+    return (
+      sum +
+      projectedPopulation(zone, year) *
+        ANNUAL_VALUE_PER_CAPITA *
+        welfareDelta
+    );
+  }, 0);
+  const lifecycleCost = selected.reduce(
+    (sum, candidate) => sum + candidate.cost,
+    0,
+  );
+  const robustnessPenalty = selected.reduce(
+    (sum, candidate) => sum + cvar90(candidate),
+    0,
+  );
+  const efficiencyBenefit = efficiencyAnnual * benefitPv;
+  const equityBenefit = equityAnnual * benefitPv;
+  const objective =
+    (1 - equityShare) * efficiencyBenefit +
+    equityShare * equityBenefit -
+    lifecycleCost -
+    robustnessPenalty;
+  const scores = nextModels.map((model) => model.score);
+  return {
+    scores,
+    efficiencyBenefit,
+    equityBenefit,
+    lifecycleCost,
+    robustnessPenalty,
+    objective,
+    fairness: fairnessIndex(scores),
+  };
+}
+
+function optimizePortfolio(
+  candidates: GeneratedCandidate[],
+  budget: number,
+  equityShare: number,
+  year: number,
+  perturbation: Record<string, number> = {},
+) {
+  let selected: GeneratedCandidate[] = [];
+  let current = evaluatePortfolio(selected, year, equityShare, perturbation);
+  while (selected.length < 4) {
+    const available = candidates
+      .filter(
+        (candidate) =>
+          !selected.some((item) => item.id === candidate.id) &&
+          !selected.some((item) => item.parcelId === candidate.parcelId) &&
+          current.lifecycleCost + candidate.cost <= budget,
+      )
+      .map((candidate) => {
+        const evaluation = evaluatePortfolio(
+          [...selected, candidate],
+          year,
+          equityShare,
+          perturbation,
+        );
+        return {
+          candidate,
+          evaluation,
+          marginal: evaluation.objective - current.objective,
+        };
+      })
+      .sort((a, b) => b.marginal - a.marginal);
+    if (!available[0] || available[0].marginal <= 0) break;
+    selected = [...selected, available[0].candidate];
+    current = available[0].evaluation;
+  }
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    let bestSwap:
+      | { portfolio: GeneratedCandidate[]; evaluation: PortfolioEvaluation }
+      | undefined;
+    selected.forEach((chosen, index) => {
+      candidates.forEach((candidate) => {
+        if (selected.some((item) => item.id === candidate.id)) return;
+        const trial = selected.map((item, itemIndex) =>
+          itemIndex === index ? candidate : item,
+        );
+        if (new Set(trial.map((item) => item.parcelId)).size !== trial.length) return;
+        if (trial.reduce((sum, item) => sum + item.cost, 0) > budget) return;
+        const evaluation = evaluatePortfolio(
+          trial,
+          year,
+          equityShare,
+          perturbation,
+        );
+        if (
+          evaluation.objective > current.objective + 0.001 &&
+          (!bestSwap || evaluation.objective > bestSwap.evaluation.objective)
+        ) {
+          bestSwap = { portfolio: trial, evaluation };
+        }
+      });
+    });
+    if (!bestSwap) break;
+    selected = bestSwap.portfolio;
+    current = bestSwap.evaluation;
+  }
+  return { selected, evaluation: current };
+}
+
+function worldCupDemand(stadium: Stadium, scenarioKey: MatchScenarioKey) {
+  const scenario = matchScenarios[scenarioKey];
+  const spectators = stadium.capacity * scenario.attendanceRate;
+  const lodgingShare =
+    scenario.internationalRatio + scenario.domesticVisitorRatio * 0.65;
+  return {
+    spectators,
+    required: {
+      交通: spectators * 0.92 * scenario.simultaneousLoad,
+      住宿: spectators * lodgingShare * scenario.simultaneousLoad,
+      餐饮: spectators * 0.74 * scenario.simultaneousLoad,
+      医疗: spectators * 0.13 * scenario.simultaneousLoad,
+      公卫: spectators * 0.55 * scenario.simultaneousLoad,
+    },
+  };
+}
+
+function evaluateWorldCupPortfolio(
+  stadium: Stadium,
+  scenarioKey: MatchScenarioKey,
+  selected: StadiumIntervention[],
+  legacyShare: number,
+) {
+  const demand = worldCupDemand(stadium, scenarioKey);
+  const supply = { ...stadium.limits };
+  selected.forEach((intervention) => {
+    (Object.keys(intervention.capacityGain) as Array<keyof Stadium["limits"]>).forEach(
+      (key) => {
+        supply[key] += intervention.capacityGain[key] ?? 0;
+      },
+    );
+  });
+  const readinessByChain = Object.fromEntries(
+    (Object.keys(demand.required) as Array<keyof Stadium["limits"]>).map((key) => [
+      key,
+      Math.min(1, supply[key] / demand.required[key]),
+    ]),
+  ) as Record<keyof Stadium["limits"], number>;
+  const limitingEntry = (
+    Object.entries(readinessByChain) as Array<
+      [keyof Stadium["limits"], number]
+    >
+  ).sort((a, b) => a[1] - b[1])[0];
+  const effectiveAttendance = demand.spectators * limitingEntry[1];
+  const eventBenefit =
+    Math.max(0, effectiveAttendance) * 8 * 0.000036;
+  const legacyValue = selected.reduce(
+    (sum, intervention) =>
+      sum +
+      intervention.legacyAnnualValue *
+        intervention.reuseRate *
+        annuityFactor(15),
+    0,
+  );
+  const lifecycleCost = selected.reduce(
+    (sum, intervention) => sum + intervention.cost,
+    0,
+  );
+  const idlenessPenalty = selected.reduce(
+    (sum, intervention) =>
+      sum +
+      intervention.cost *
+        intervention.idlenessRisk *
+        (1 - intervention.reuseRate) *
+        1.5,
+    0,
+  );
+  return {
+    demand,
+    supply,
+    readinessByChain,
+    bottleneck: limitingEntry[0],
+    effectiveAttendance,
+    eventBenefit,
+    legacyValue,
+    lifecycleCost,
+    idlenessPenalty,
+    objective:
+      (1 - legacyShare) * eventBenefit +
+      legacyShare * legacyValue -
+      lifecycleCost -
+      idlenessPenalty,
+  };
+}
+
+function optimizeWorldCupPortfolio(
+  stadium: Stadium,
+  scenarioKey: MatchScenarioKey,
+  budget: number,
+  legacyShare: number,
+) {
+  const candidates = stadiumInterventions.filter((intervention) =>
+    intervention.appliesTo.includes(stadium.id),
+  );
+  let selected: StadiumIntervention[] = [];
+  let current = evaluateWorldCupPortfolio(
+    stadium,
+    scenarioKey,
+    selected,
+    legacyShare,
+  );
+  while (selected.length < 3) {
+    const options = candidates
+      .filter(
+        (candidate) =>
+          !selected.some((item) => item.id === candidate.id) &&
+          current.lifecycleCost + candidate.cost <= budget,
+      )
+      .map((candidate) => {
+        const evaluation = evaluateWorldCupPortfolio(
+          stadium,
+          scenarioKey,
+          [...selected, candidate],
+          legacyShare,
+        );
+        return {
+          candidate,
+          evaluation,
+          marginal: evaluation.objective - current.objective,
+        };
+      })
+      .sort((a, b) => b.marginal - a.marginal);
+    if (!options[0] || options[0].marginal <= 0) break;
+    selected = [...selected, options[0].candidate];
+    current = options[0].evaluation;
+  }
+  return { selected, evaluation: current, candidateCount: candidates.length };
 }
 
 function stdDev(values: number[]) {
@@ -552,6 +1299,15 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(Math.round(value));
 }
 
+function deterministicNoise(sample: number, key: string) {
+  const keySeed = [...key].reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+  const value = Math.sin(sample * 9283.17 + keySeed * 17.31) * 43758.5453;
+  return (value - Math.floor(value)) * 2 - 1;
+}
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>("housing");
   const [mapScale, setMapScale] = useState<MapScale>("local");
@@ -559,6 +1315,9 @@ export default function Home() {
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
   const [budget, setBudget] = useState(3.2);
+  const [forecastYear, setForecastYear] = useState(2030);
+  const [matchScenario, setMatchScenario] =
+    useState<MatchScenarioKey>("final");
   const [factorView, setFactorView] = useState<"core" | "all">("all");
   const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("none");
   const [importKey, setImportKey] = useState("");
@@ -577,12 +1336,17 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [toast, setToast] = useState("");
 
+  const generatedCandidates = useMemo(
+    () => generateCandidates(landParcels, housingZones),
+    [],
+  );
+
   const housingScores = useMemo(() => {
     const prices = housingZones.map((zone) => zone.price);
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     return housingZones.map((zone) => {
-      const model = housingValue(zone.metrics, zone.risk);
+      const model = housingValue(zone, existingFacilities, forecastYear);
       // 房价严格位于模型之外：仅在价值评分完成后转换为可比指数。
       const priceIndex =
         45 + ((zone.price - minPrice) / (maxPrice - minPrice)) * 45;
@@ -591,12 +1355,17 @@ export default function Home() {
         ...zone,
         service: model.score,
         score: model.score,
+        rawScore: model.rawScore,
+        riskMultiplier: model.riskMultiplier,
+        metrics: model.metrics,
+        weights: model.weights,
+        interactionEffect: model.interactionEffect,
         ringScores: model.ringScores,
         priceIndex,
         residual,
       };
     });
-  }, []);
+  }, [forecastYear]);
 
   const meanHousingScore =
     housingScores.reduce((sum, zone) => sum + zone.score, 0) / housingScores.length;
@@ -607,147 +1376,199 @@ export default function Home() {
     housingScores.find((zone) => zone.id === activeHousingId) ?? housingScores[0];
   const activeStadium =
     stadiums.find((stadium) => stadium.id === activeStadiumId) ?? stadiums[0];
-  const stadiumScore = weightedScore(activeStadium.metrics, cupFactors);
-  const effectiveCapacity = Math.min(...Object.values(activeStadium.limits));
-  const capacityRate = (effectiveCapacity / activeStadium.capacity) * 100;
+  const housingOptimization = useMemo(
+    () =>
+      optimizePortfolio(
+        generatedCandidates,
+        budget,
+        fairnessWeight / 100,
+        forecastYear,
+      ),
+    [budget, fairnessWeight, forecastYear, generatedCandidates],
+  );
 
   const housingRecommendations = useMemo<Recommendation[]>(() => {
-    const currentScores = housingScores.map((zone) => zone.score);
-    const currentFairness = fairnessIndex(currentScores);
-    const scored = sitingCandidates.map((candidate) => {
-      const zoneIndex = housingScores.findIndex(
-        (zone) => zone.id === candidate.zoneId,
+    const baseEvaluation = evaluatePortfolio(
+      [],
+      forecastYear,
+      fairnessWeight / 100,
+    );
+    return housingOptimization.selected.slice(0, 3).map((candidate, index) => {
+      const withoutCandidate = housingOptimization.selected.filter(
+        (item) => item.id !== candidate.id,
       );
-      const zone = housingScores[zoneIndex];
+      const marginalEvaluation = evaluatePortfolio(
+        withoutCandidate,
+        forecastYear,
+        fairnessWeight / 100,
+      );
+      const affectedZones = housingZones.filter(
+        (_, zoneIndex) =>
+          housingOptimization.evaluation.scores[zoneIndex] -
+            marginalEvaluation.scores[zoneIndex] >
+          0.15,
+      );
+      const nearestZone =
+        housingZones.find((zone) => zone.id === candidate.nearestZoneId) ??
+        housingZones[0];
       const factor = housingFactors.find(
         (item) => item.key === candidate.factor,
       )!;
-      const nextMetrics = {
-        ...zone.metrics,
-        [candidate.factor]: Math.min(
-          100,
-          zone.metrics[candidate.factor] + candidate.boost,
-        ),
-      };
-      const nextValue = housingValue(nextMetrics, zone.risk).score;
-      const valueGain = nextValue - zone.score;
-      const nextScores = [...currentScores];
-      nextScores[zoneIndex] = nextValue;
-      const fairnessGain = fairnessIndex(nextScores) - currentFairness;
-      const populationBenefit = valueGain * zone.population;
-      const equityShare = fairnessWeight / 100;
-      const budgetPenalty = Math.max(0, candidate.cost - budget) * 8;
-      const objective =
-        populationBenefit * (1 - equityShare) +
-        fairnessGain * 18 * equityShare +
-        candidate.robustness * 0.08 -
-        candidate.cost * 2.5 -
-        budgetPenalty;
+      const marginalObjective =
+        housingOptimization.evaluation.objective -
+        marginalEvaluation.objective;
+      const fairnessGain =
+        housingOptimization.evaluation.fairness - baseEvaluation.fairness;
       return {
-        ...candidate,
-        zone,
-        factor,
-        valueGain,
-        fairnessGain,
-        populationBenefit,
-        objective,
+        rank: index + 1,
+        type: `${ringNames[factor.ring]} · ${factor.label}`,
+        title: `新建${candidate.facility}`,
+        place: `${nearestZone.name}附近 · ${candidate.parcelName}`,
+        impact: `净效益 +${marginalObjective.toFixed(2)} 亿元`,
+        detail: `组合方案成员 · 影响 ${affectedZones.length} 个社区；全生命周期成本 ${candidate.cost.toFixed(2)} 亿元，预计 ${candidate.openingYear} 年投用，组合公平指数 +${fairnessGain.toFixed(1)}。`,
+        score: Math.round(candidate.robustness),
+        tone: (["lime", "coral", "blue"] as const)[index],
       };
     });
+  }, [fairnessWeight, forecastYear, housingOptimization]);
 
-    const ranked: Array<
-      (typeof scored)[number] & { paretoRank: number }
-    > = [];
-    let remaining = [...scored];
-    let paretoRank = 1;
-    while (remaining.length > 0) {
-      const front = remaining.filter(
-        (candidate) =>
-          !remaining.some((other) => {
-            const noWorse =
-              other.populationBenefit >= candidate.populationBenefit &&
-              other.fairnessGain >= candidate.fairnessGain &&
-              other.cost <= candidate.cost &&
-              other.robustness >= candidate.robustness;
-            const strictlyBetter =
-              other.populationBenefit > candidate.populationBenefit ||
-              other.fairnessGain > candidate.fairnessGain ||
-              other.cost < candidate.cost ||
-              other.robustness > candidate.robustness;
-            return noWorse && strictlyBetter;
-          }),
+  const sensitivityReport = useMemo(() => {
+    const samples = 48;
+    const ranks = new Map<string, number[]>();
+    generatedCandidates.forEach((candidate) =>
+      ranks.set(candidate.id, []),
+    );
+    for (let sample = 0; sample < samples; sample += 1) {
+      const perturbation = Object.fromEntries(
+        housingFactors.map((factor) => [
+          factor.key,
+          1 + deterministicNoise(sample, factor.key) * 0.2,
+        ]),
       );
-      ranked.push(...front.map((candidate) => ({ ...candidate, paretoRank })));
-      const frontKeys = new Set(
-        front.map(
-          (candidate) =>
-            `${candidate.zoneId}-${candidate.factor}-${candidate.parcel}`,
+      const sampleEquity = Math.max(
+        0.2,
+        Math.min(
+          1,
+          fairnessWeight / 100 + deterministicNoise(sample, "lambda") * 0.2,
         ),
       );
-      remaining = remaining.filter(
-        (candidate) =>
-          !frontKeys.has(
-            `${candidate.zoneId}-${candidate.factor}-${candidate.parcel}`,
-          ),
+      const result = optimizePortfolio(
+        generatedCandidates,
+        budget,
+        sampleEquity,
+        forecastYear,
+        perturbation,
       );
-      paretoRank += 1;
+      generatedCandidates.forEach((candidate) => {
+        const rank = result.selected.findIndex(
+          (item) => item.id === candidate.id,
+        );
+        ranks.get(candidate.id)!.push(rank >= 0 ? rank + 1 : 5);
+      });
     }
-
-    return ranked
+    return generatedCandidates
+      .map((candidate) => {
+        const candidateRanks = ranks.get(candidate.id)!;
+        const top3Rate =
+          candidateRanks.filter((rank) => rank <= 3).length / samples;
+        return {
+          candidate,
+          top3Rate,
+          meanRank:
+            candidateRanks.reduce((sum, rank) => sum + rank, 0) /
+            candidateRanks.length,
+          rankStd: stdDev(candidateRanks),
+        };
+      })
       .sort(
         (a, b) =>
-          a.paretoRank - b.paretoRank || b.objective - a.objective,
+          b.top3Rate - a.top3Rate || a.meanRank - b.meanRank,
       )
-      .slice(0, 3)
-      .map((candidate, index) => ({
-        rank: index + 1,
-        type: `${ringNames[candidate.factor.ring]} · ${candidate.factor.label}`,
-        title: `新建${candidate.facility}`,
-        place: `${candidate.zone.name} · ${candidate.parcel}`,
-        impact: `价值 +${candidate.valueGain.toFixed(1)}`,
-        detail: `硬约束通过 · 帕累托 F${candidate.paretoRank}；公平指数 +${candidate.fairnessGain.toFixed(1)}，人口收益 ${candidate.populationBenefit.toFixed(1)}，成本 ${candidate.cost.toFixed(2)} 亿元。`,
-        score: candidate.robustness,
-        tone: (["lime", "coral", "blue"] as const)[index],
-      }));
-  }, [budget, fairnessWeight, housingScores]);
+      .slice(0, 3);
+  }, [budget, fairnessWeight, forecastYear, generatedCandidates]);
 
-  const cupRecommendations: Recommendation[] = [
-    {
-      rank: 1,
-      type: "住宿集群",
-      title: "建设赛事旅馆组团",
-      place: "临港站东侧 · 3.2km",
-      impact: "新增 8,600 床",
-      detail: "与轨道接驳共址，赛后转为青年公寓与会展住宿，避免单一赛事资产闲置。",
-      score: 98,
-      tone: "lime",
-    },
-    {
-      rank: 2,
-      type: "交通疏散",
-      title: "设置 P+R 接驳枢纽",
-      place: "滨海大道 · 城市外环",
-      impact: "疏散 +16,000 人/h",
-      detail: "形成三向离场通道，预计将 90 分钟疏散覆盖率由 36% 提升至 74%。",
-      score: 93,
-      tone: "blue",
-    },
-    {
-      rank: 3,
-      type: "场馆备选",
-      title: "新球场候选地 B-07",
-      place: "龙城新区 · 综合交通廊道",
-      impact: "适配 45,000 座",
-      detail: "周边既有设施可承载 38,200 人；仅需补充公卫与短时住宿，综合成本更低。",
-      score: 86,
-      tone: "coral",
-    },
-  ];
+  const cupOptimization = useMemo(
+    () =>
+      optimizeWorldCupPortfolio(
+        activeStadium,
+        matchScenario,
+        budget,
+        fairnessWeight / 100,
+      ),
+    [activeStadium, budget, fairnessWeight, matchScenario],
+  );
+  const cupBaseline = useMemo(
+    () =>
+      evaluateWorldCupPortfolio(
+        activeStadium,
+        matchScenario,
+        [],
+        fairnessWeight / 100,
+      ),
+    [activeStadium, fairnessWeight, matchScenario],
+  );
+  const effectiveCapacity = cupBaseline.effectiveAttendance;
+  const capacityRate =
+    (effectiveCapacity / cupBaseline.demand.spectators) * 100;
+  const cupMetrics = {
+    ...activeStadium.metrics,
+    transit: cupBaseline.readinessByChain.交通 * 100,
+    lodging: cupBaseline.readinessByChain.住宿 * 100,
+    dining: cupBaseline.readinessByChain.餐饮 * 100,
+    medical: cupBaseline.readinessByChain.医疗 * 100,
+    sanitary: cupBaseline.readinessByChain.公卫 * 100,
+  };
+  const stadiumScore = weightedScore(cupMetrics, cupFactors);
+
+  const cupRecommendations = useMemo<Recommendation[]>(() => {
+    return cupOptimization.selected.map((intervention, index) => {
+      const without = cupOptimization.selected.filter(
+        (item) => item.id !== intervention.id,
+      );
+      const previous = evaluateWorldCupPortfolio(
+        activeStadium,
+        matchScenario,
+        without,
+        fairnessWeight / 100,
+      );
+      const attendanceGain =
+        cupOptimization.evaluation.effectiveAttendance -
+        previous.effectiveAttendance;
+      const idleLoss =
+        intervention.cost *
+        intervention.idlenessRisk *
+        (1 - intervention.reuseRate) *
+        1.5;
+      const mainGain = Object.entries(intervention.capacityGain).sort(
+        (a, b) => (b[1] ?? 0) - (a[1] ?? 0),
+      )[0];
+      return {
+        rank: index + 1,
+        type: intervention.type,
+        title: intervention.title,
+        place: intervention.place,
+        impact: `有效承载 +${formatNumber(attendanceGain)} 人`,
+        detail: `成本 ${intervention.cost.toFixed(2)} 亿元；赛后复用率 ${(intervention.reuseRate * 100).toFixed(0)}%，闲置风险 CVaR ${idleLoss.toFixed(2)} 亿元；主要补充${mainGain[0]} ${formatNumber(mainGain[1] ?? 0)}。`,
+        score: Math.round(
+          100 *
+            (0.55 * intervention.reuseRate +
+              0.45 * (1 - intervention.idlenessRisk)),
+        ),
+        tone: (["lime", "blue", "coral"] as const)[index],
+      };
+    });
+  }, [
+    activeStadium,
+    cupOptimization,
+    fairnessWeight,
+    matchScenario,
+  ]);
 
   const factors = mode === "housing" ? housingFactors : cupFactors;
   const recommendations =
     mode === "housing" ? housingRecommendations : cupRecommendations;
   const activeMetrics =
-    mode === "housing" ? activeHousing.metrics : activeStadium.metrics;
+    mode === "housing" ? activeHousing.metrics : cupMetrics;
   const currentScale = mapScales[mapScale];
   const markers =
     mode === "housing"
@@ -814,8 +1635,10 @@ export default function Home() {
       mode === "housing"
         ? asksAboutPrice
           ? `${activeHousing.name}的模型价值为 ${activeHousing.score.toFixed(1)}，房价指数为 ${activeHousing.priceIndex.toFixed(1)}，残差为 ${activeHousing.residual > 0 ? "+" : ""}${activeHousing.residual.toFixed(1)}。房价没有参与评分；偏差解释是：${activeHousing.priceReason}`
-          : `在当前 ${budget.toFixed(1)} 亿元预算和 ${fairnessWeight}% 公平性偏好下，建议先在${housingRecommendations[0].place}建设${housingRecommendations[0].title}。这是对全部候选点逐点重算价值、公平性和成本后的最高目标函数解。`
-        : `${activeStadium.name}的名义容量为 ${formatNumber(activeStadium.capacity)} 人，但当前瓶颈是住宿，仅能承载 ${formatNumber(effectiveCapacity)} 人。应先建设临港站东侧旅馆组团，再配置 P+R 接驳，完成后再复算医疗与公卫瓶颈。`;
+          : housingRecommendations[0]
+            ? `在 ${forecastYear} 年评估期、${budget.toFixed(1)} 亿元预算和 ${fairnessWeight}% 公平性偏好下，组合优化建议先在${housingRecommendations[0].place}建设${housingRecommendations[0].title}。它同时影响多个社区，且已经计入距离衰减、人口需求、风险折扣与全生命周期成本。`
+            : `当前预算和评估年份下没有正净效益且满足硬约束的建设组合，建议延长评估期或提高预算后复算。`
+        : `${activeStadium.name}在“${matchScenarios[matchScenario].label}”情景下预计到场 ${formatNumber(cupBaseline.demand.spectators)} 人，当前${cupBaseline.bottleneck}链只能支持约 ${formatNumber(effectiveCapacity)} 人。${cupRecommendations[0] ? `动态优化首先建议${cupRecommendations[0].title}。` : "当前预算内没有正净效益干预。"}推荐已计入赛后复用和闲置风险。`;
     setMessages((items) => [
       ...items,
       { role: "user", text: question },
@@ -875,12 +1698,12 @@ export default function Home() {
         <aside className="control-rail">
           <div className="rail-heading">
             <span className="eyebrow">决策控制台</span>
-            <span className="version">MODEL 2.0</span>
+            <span className="version">MODEL 3.0</span>
           </div>
 
           <div className="control-group">
             <label htmlFor="fairness">
-              <span>公平性偏好</span>
+              <span>{mode === "housing" ? "公平性偏好" : "赛后利用权重"}</span>
               <strong>{fairnessWeight}%</strong>
             </label>
             <input
@@ -892,8 +1715,8 @@ export default function Home() {
               onChange={(event) => setFairnessWeight(Number(event.target.value))}
             />
             <div className="range-labels">
-              <span>效率优先</span>
-              <span>均衡优先</span>
+              <span>{mode === "housing" ? "效率优先" : "赛事优先"}</span>
+              <span>{mode === "housing" ? "均衡优先" : "遗产优先"}</span>
             </div>
           </div>
 
@@ -913,6 +1736,38 @@ export default function Home() {
             />
             <p>约束：建设成本、土地适宜性、设施服务半径</p>
           </div>
+
+          {mode === "housing" ? (
+            <div className="scenario-control">
+              <label htmlFor="forecast-year">评估年份</label>
+              <select
+                id="forecast-year"
+                value={forecastYear}
+                onChange={(event) => setForecastYear(Number(event.target.value))}
+              >
+                <option value={2026}>2026 · 当前快照</option>
+                <option value={2030}>2030 · 中期规划</option>
+                <option value={2035}>2035 · 国土空间远景</option>
+              </select>
+              <small>规划设施按投用年份折现，人口按各社区增长率预测。</small>
+            </div>
+          ) : (
+            <div className="scenario-control">
+              <label htmlFor="match-scenario">赛事需求情景</label>
+              <select
+                id="match-scenario"
+                value={matchScenario}
+                onChange={(event) =>
+                  setMatchScenario(event.target.value as MatchScenarioKey)
+                }
+              >
+                {Object.entries(matchScenarios).map(([key, scenario]) => (
+                  <option value={key} key={key}>{scenario.label}</option>
+                ))}
+              </select>
+              <small>观众规模、外地客比例与多场并发会同步改变需求链。</small>
+            </div>
+          )}
 
           <div className="factor-heading">
             <span>评估变量</span>
@@ -935,7 +1790,7 @@ export default function Home() {
                       {factor.label}
                       <small>
                         {"ring" in factor
-                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.radius}`
+                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.radius} · 权重 ${activeHousing.weights[factor.key].toFixed(1)}`
                           : factor.radius}
                       </small>
                     </span>
@@ -951,8 +1806,8 @@ export default function Home() {
 
           {factorView === "all" && mode === "housing" && (
             <div className="extended-factors">
-              <span>三层权重封顶</span>
-              <p>内圈生活服务 70% · 中圈城市结构 20% · 外圈宏观韧性 10%；洪涝、污染和地质危险另做硬约束。</p>
+              <span>空间—人群—风险联合模型</span>
+              <p>内圈由设施坐标、容量、品质和距离衰减计算；权重随人口结构变化，最终价值再乘多维风险折扣。</p>
             </div>
           )}
 
@@ -960,7 +1815,7 @@ export default function Home() {
             <span>ƒ</span>
             <span>
               查看模型与公式
-              <small>可解释评分 · 硬约束优先</small>
+              <small>空间衰减 · 组合优化 · 敏感性检验</small>
             </span>
             <b>→</b>
           </button>
@@ -1163,10 +2018,10 @@ export default function Home() {
                   </span>
                 </div>
                 <div className="score-stat">
-                  <span>三层模型价值</span>
+                  <span>{forecastYear} 年风险后价值</span>
                   <strong>{activeHousing.score.toFixed(1)}</strong>
                   <small>
-                    内 {activeHousing.ringScores.inner.toFixed(0)} · 中 {activeHousing.ringScores.middle.toFixed(0)} · 外 {activeHousing.ringScores.outer.toFixed(0)}
+                    原始 {activeHousing.rawScore.toFixed(1)} × 风险 {activeHousing.riskMultiplier.toFixed(2)}
                   </small>
                 </div>
                 <div className="score-stat">
@@ -1182,12 +2037,14 @@ export default function Home() {
                     {
                       [...housingFactors].sort(
                         (a, b) =>
-                          (100 - activeHousing.metrics[b.key]) * b.weight -
-                          (100 - activeHousing.metrics[a.key]) * a.weight,
+                          (100 - activeHousing.metrics[b.key]) *
+                            activeHousing.weights[b.key] -
+                          (100 - activeHousing.metrics[a.key]) *
+                            activeHousing.weights[a.key],
                       )[0].label
                     }
                   </strong>
-                  <small>缺口 × 权重后进入候选设施生成</small>
+                  <small>人口自适应权重 × 空间供需缺口</small>
                 </div>
               </>
             ) : (
@@ -1212,7 +2069,7 @@ export default function Home() {
                 <div className="score-stat warning">
                   <span>可用率</span>
                   <strong>{capacityRate.toFixed(0)}%</strong>
-                  <small>当前瓶颈：住宿床位</small>
+                  <small>当前瓶颈：{cupBaseline.bottleneck}</small>
                 </div>
               </>
             )}
@@ -1257,8 +2114,8 @@ export default function Home() {
             </div>
             <p>
               {mode === "housing"
-                ? `当前区域变异系数 ${(cv * 100).toFixed(1)}%。增加公平权重后，算法会优先提升低值区，而非继续叠加中心区。`
-                : `场馆本体不是瓶颈。${formatNumber(activeStadium.capacity - effectiveCapacity)} 人的设施缺口集中在住宿、交通与医疗链路。`}
+                ? `当前区域变异系数 ${(cv * 100).toFixed(1)}%。评分已按各社区人口结构调整权重，并由洪涝、污染等风险整体折价。`
+                : `${matchScenarios[matchScenario].label}预计到场 ${formatNumber(cupBaseline.demand.spectators)} 人；${cupBaseline.bottleneck}是当前最弱需求链。`}
             </p>
           </section>
 
@@ -1295,12 +2152,58 @@ export default function Home() {
             </section>
           )}
 
+          {mode === "housing" && (
+            <section className="sensitivity-card">
+              <div className="price-audit-head">
+                <span>±20% 敏感性分析</span>
+                <b>48 次情景</b>
+              </div>
+              {sensitivityReport.map((item) => (
+                <div className="sensitivity-row" key={item.candidate.id}>
+                  <span>
+                    <strong>{item.candidate.facility}</strong>
+                    <small>{item.candidate.parcelId}</small>
+                  </span>
+                  <i>
+                    <b style={{ width: `${item.top3Rate * 100}%` }} />
+                  </i>
+                  <em className={item.rankStd < 1 ? "stable" : ""}>
+                    {(item.top3Rate * 100).toFixed(0)}%
+                  </em>
+                </div>
+              ))}
+              <p>百分比表示在权重和公平参数扰动后仍进入前三方案的频率；绿色表示排名标准差小于 1。</p>
+            </section>
+          )}
+
+          <section className="portfolio-summary">
+            <span>{mode === "housing" ? "组合方案账本" : "赛事成本效益"}</span>
+            {mode === "housing" ? (
+              <div>
+                <b>{housingOptimization.selected.length} 项设施</b>
+                <small>成本 {housingOptimization.evaluation.lifecycleCost.toFixed(2)} 亿</small>
+                <small>CVaR {housingOptimization.evaluation.robustnessPenalty.toFixed(2)} 亿</small>
+              </div>
+            ) : (
+              <div>
+                <b>{cupOptimization.selected.length} 项干预</b>
+                <small>成本 {cupOptimization.evaluation.lifecycleCost.toFixed(2)} 亿</small>
+                <small>赛后价值 {cupOptimization.evaluation.legacyValue.toFixed(2)} 亿</small>
+              </div>
+            )}
+          </section>
+
           <div className="recommendation-heading">
-            <span>选址建议</span>
-            <small>按可解释目标函数排序</small>
+            <span>{mode === "housing" ? "组合选址建议" : "动态干预建议"}</span>
+            <small>{mode === "housing" ? "贪心 + swap 局部搜索" : "随需求、预算和赛后权重重算"}</small>
           </div>
 
           <div className="recommendation-list">
+            {recommendations.length === 0 && (
+              <div className="empty-recommendation">
+                当前预算与时点下没有正净效益方案。可提高预算或延长评估期后重新计算。
+              </div>
+            )}
             {recommendations.map((item) => (
               <article className="recommendation-card" key={item.rank}>
                 <div className={`rank ${item.tone}`}>0{item.rank}</div>
@@ -1318,9 +2221,18 @@ export default function Home() {
             ))}
           </div>
 
-          <button className="run-button" onClick={() => showToast(`已筛选 ${sitingCandidates.length} 个候选点并完成边际模拟`)}>
+          <button
+            className="run-button"
+            onClick={() =>
+              showToast(
+                mode === "housing"
+                  ? `已从 ${landParcels.length} 个地块自动生成 ${generatedCandidates.length} 个候选，并完成组合优化`
+                  : `已按${matchScenarios[matchScenario].label}重算 ${cupOptimization.candidateCount} 项干预`,
+              )
+            }
+          >
             <span>运行新一轮优化</span>
-            <small>当前演示：枚举 + 帕累托 · 生产路由：Greedy / MILP / PSO / NSGA-II + SA</small>
+            <small>{mode === "housing" ? "自动候选生成 · 多社区溢出 · 贪心 + 局部交换" : "动态需求链 · 全生命周期成本 · 赛后闲置 CVaR"}</small>
           </button>
         </aside>
       </section>
@@ -1390,7 +2302,7 @@ export default function Home() {
                 <span className="modal-kicker">DATA CONNECTOR</span>
                 <h2>从腾讯地图建立真实空间样本</h2>
                 <p className="modal-lead">
-                  输入 WebService Key 后，系统按设施类别检索 POI、计算路网距离并转换为模型变量。没有 Key 也可载入同结构演示数据。
+                  输入 WebService Key 后，系统按设施类别检索 POI并保留坐标；容量与品质可由开放数据补齐或人工校核，再进入距离衰减模型。没有 Key 也可载入同结构演示数据。
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -1402,16 +2314,16 @@ export default function Home() {
                     <input
                       value={importKey}
                       onChange={(event) => setImportKey(event.target.value)}
-                      placeholder="留空则导入朝阳区演示样本"
+                      placeholder="留空则导入厦门湖里演示样本"
                       type="password"
                     />
                   </label>
                   <div className="import-pipeline">
                     <span><b>01</b> POI 分类检索</span>
                     <i>→</i>
-                    <span><b>02</b> 路网距离矩阵</span>
+                    <span><b>02</b> 坐标 / 路网距离</span>
                     <i>→</i>
-                    <span><b>03</b> 容量归一化</span>
+                    <span><b>03</b> 容量品质校准</span>
                   </div>
                   {importStatus === "error" && (
                     <div className="form-error">连接失败，请检查 Key、域名白名单或配额后重试。</div>
@@ -1464,13 +2376,15 @@ export default function Home() {
                 {mode === "housing" ? (
                   <div className="model-explainer">
                     <div className="formula">
-                      V<sub>i</sub> = 0.70 L<sub>i</sub> + 0.20 M<sub>i</sub> + 0.10 O<sub>i</sub> − R<sub>i</sub>
+                      A<sub>ikt</sub> = Sigmoid[ Σ C<sub>j</sub>Q<sub>j</sub>f(d<sub>ij</sub>)δ<sub>jt</sub> / D<sub>it</sub> ]
+                      <br />
+                      V<sub>it</sub> = [0.70L + 0.20M + 0.10O + I] × m(R)
                     </div>
                     <div className="model-grid">
-                      <article><b>L · 内圈 70%</b><p>基层医疗、基础教育、公交、养老托育、购物、公园、文化、餐饮与社区安全；使用路网时间衰减、容量供需比和品质系数。</p></article>
-                      <article><b>M · 中圈 20%</b><p>大型商场、岗位可达、三甲医院、高校、轨道枢纽、公共服务、物流、场馆与数字设施，反映跨生活圈城市结构。</p></article>
-                      <article><b>O · 外圈 10%</b><p>政策与区域增长、空气、生态、工业环境、灾害韧性、人口结构、气候和历史文化；权重低但不再遗漏。</p></article>
-                      <article><b>R · 硬约束</b><p>污染地块、洪涝、滑坡、断裂带和危化品距离先过滤；地形、日照与工业影响再作连续修正。</p></article>
+                      <article><b>空间供需 A</b><p>设施以坐标、容量、品质和投用年份记录。医疗等使用高斯衰减，公交使用指数衰减，商业等使用重力衰减；Sigmoid 自动体现饱和效应。</p></article>
+                      <article><b>非线性交互 I</b><p>医疗×公交、教育×绿地、岗位×轨道形成互补奖励；养老服务与低安全、绿地与污染暴露形成冲突惩罚。</p></article>
+                      <article><b>人口自适应权重</b><p>老年、儿童与劳动年龄人口按偏好向量混合，并在各空间层内重新归一化。因此同一设施对不同社区的价值不同。</p></article>
+                      <article><b>时间与风险 m(R)</b><p>人口按社区增长率预测，规划设施按投用年折现；地质、洪涝、污染、工业和噪声合成为 0.3–1.0 的整体价值乘数。</p></article>
                     </div>
                     <div className="price-rule">
                       <b>房价不进入 V</b>
@@ -1478,25 +2392,25 @@ export default function Home() {
                     </div>
                     <h3 className="algorithm-title">选址建议如何生成</h3>
                     <div className="siting-steps">
-                      <span><b>01</b>生成候选点<small>可建设地块、路口与存量更新点</small></span>
+                      <span><b>01</b>自动生成<small>地块 × 允许设施类型</small></span>
                       <i>→</i>
-                      <span><b>02</b>硬约束过滤<small>用地、灾害、安全距离与预算</small></span>
+                      <span><b>02</b>空间过滤<small>用地、风险、服务半径和预算</small></span>
                       <i>→</i>
-                      <span><b>03</b>逐点边际模拟<small>重算可达性、价值与公平指数</small></span>
+                      <span><b>03</b>组合贪心<small>每次重算所有社区的边际效益</small></span>
                       <i>→</i>
-                      <span><b>04</b>帕累托排序<small>收益、均衡、成本与稳健性</small></span>
+                      <span><b>04</b>swap 精修<small>替换设施，跳出贪心局部解</small></span>
                     </div>
                     <div className="objective">
-                      max J(x,f) = (1−λ) · Δ人口加权价值 + λ · Δ公平性 − μ · 全生命周期成本 + ρ · 稳健性
+                      max J = (1−λ) · 效率收益PV + λ · 公平福利PV − 全生命周期成本 − 风险CVaR
                     </div>
-                    <p className="algorithm-note">当前演示会对 {sitingCandidates.length} 个“地块 × 设施类型”组合逐一重算，而不是直接把最低分区域写成推荐答案。</p>
+                    <p className="algorithm-note">四项目标均转换为亿元现值。当前由 {landParcels.length} 个地块自动生成 {generatedCandidates.length} 个合法候选，每个新增设施都通过距离函数同时影响多个社区，不再使用固定 boost 或预算罚分魔法常数。</p>
 
                     <h3 className="algorithm-title">自适应求解器：问题不同，算法不同</h3>
                     <div className="solver-matrix">
                       <article>
-                        <span>GREEDY</span>
-                        <b>贪心 / 懒惰贪心</b>
-                        <p>单设施、应急补缺或需要秒级反馈。作为基线方案，也为复杂算法生成高质量初始解。</p>
+                        <span>ACTIVE</span>
+                        <b>贪心 + swap 局部搜索</b>
+                        <p>本原型已实际运行：支持最多四项设施组合、跨社区溢出、同地块互斥和预算硬约束。</p>
                       </article>
                       <article>
                         <span>MILP</span>
@@ -1515,12 +2429,12 @@ export default function Home() {
                       </article>
                     </div>
                     <div className="hybrid-route">
-                      <b>推荐组合</b>
+                      <b>当前计算链</b>
+                      <span>空间候选生成</span><i>→</i>
                       <span>贪心热启动</span><i>→</i>
-                      <span>规模可控则 MILP 校验</span><i>→</i>
-                      <span>大规模用 NSGA-II</span><i>→</i>
-                      <span>SA 局部精修</span><i>→</i>
-                      <span>多情景稳健性复核</span>
+                      <span>地块 swap</span><i>→</i>
+                      <span>48 次参数扰动</span><i>→</i>
+                      <span>稳定性报告</span>
                     </div>
 
                     <h3 className="algorithm-title">变量影响系数如何得到</h3>
@@ -1531,22 +2445,24 @@ export default function Home() {
                       <article><strong>15%</strong><span>客观信息量</span><small>熵权 / CRITIC，避免高度重复指标重复计权</small></article>
                     </div>
                     <div className="weight-disclosure">
-                      <b>当前原型状态</b>
-                      <p>现有13、11、10等基础分来自“权重决策因素ProV1.0”，70% / 20% / 10%是用于演示语义尺度的先验封顶，并非已经由大样本实证得到。生产版应按上面的四路证据重新估计，再做权重±20%的敏感性和排序稳定性检验。房价仍只做样本外验证，不参与权重拟合。</p>
+                      <b>参数披露</b>
+                      <p>现有13、11、10等基础分来自“权重决策因素ProV1.0”，再由社区人口结构动态修正。页面已经实际运行权重±20%、λ±20%的48次确定性扰动；Sigmoid阈值、衰减尺度和风险映射仍属于待用真实出行与灾害数据标定的先验。房价仍只做样本外验证。</p>
                     </div>
                   </div>
                 ) : (
                   <div className="model-explainer">
                     <div className="formula">
-                      C<sub>effective</sub> = min(C<sub>场馆</sub>, C<sub>交通</sub>, C<sub>住宿</sub>, C<sub>医疗</sub>, C<sub>公卫</sub>)
+                      D<sub>k</sub> = 到场人数 × 客群结构 × 并发系数 × 服务需求率
+                      <br />
+                      C<sub>effective</sub> = 到场人数 × min<sub>k</sub>(Supply<sub>k</sub> / D<sub>k</sub>)
                     </div>
                     <div className="model-grid">
-                      <article><b>容量链</b><p>赛事接待能力由最弱环节决定。5 万座球场附近只有 4,000 床位，当前有效承载即为 4,000 人。</p></article>
-                      <article><b>峰值时段</b><p>交通采用赛后 90 分钟疏散能力；餐饮、公卫按峰值周转率而非日均供给计算。</p></article>
-                      <article><b>赛事韧性</b><p>加入极端天气、应急医疗、通信并发和人群分区等非日常约束。</p></article>
-                      <article><b>赛后利用</b><p>选址目标同时惩罚闲置资产，优先旅馆转公寓、球迷区转社区公园等可复用方案。</p></article>
+                      <article><b>需求端已接入</b><p>小组赛、淘汰赛、决赛具有不同上座率；国际与外地观众决定住宿比例，双场并发会竞争交通、住宿和公卫资源。</p></article>
+                      <article><b>供需链动态重算</b><p>交通、住宿、餐饮、医疗、公卫分别计算 supply / demand，最小比率形成当前有效承载和动态瓶颈。</p></article>
+                      <article><b>预算驱动组合</b><p>候选干预按边际净效益逐项加入，预算是硬约束；改变场馆、赛事情景、预算或赛后权重会立即生成新推荐。</p></article>
+                      <article><b>白象风险量化</b><p>赛事收益、15年赛后公共收益、建设成本与闲置损失CVaR统一为亿元现值，优先可转公寓、公共交通和社区设施的方案。</p></article>
                     </div>
-                    <div className="objective">max J = 赛事承载提升 + 赛后公共收益 − 建设与闲置成本</div>
+                    <div className="objective">max J = (1−λ) · 赛事增量收益PV + λ · 赛后利用价值PV − 生命周期成本 − 闲置CVaR</div>
                   </div>
                 )}
               </>
