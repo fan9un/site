@@ -547,8 +547,49 @@ export default function Home() {
       };
     });
 
-    return scored
-      .sort((a, b) => b.objective - a.objective)
+    const ranked: Array<
+      (typeof scored)[number] & { paretoRank: number }
+    > = [];
+    let remaining = [...scored];
+    let paretoRank = 1;
+    while (remaining.length > 0) {
+      const front = remaining.filter(
+        (candidate) =>
+          !remaining.some((other) => {
+            const noWorse =
+              other.populationBenefit >= candidate.populationBenefit &&
+              other.fairnessGain >= candidate.fairnessGain &&
+              other.cost <= candidate.cost &&
+              other.robustness >= candidate.robustness;
+            const strictlyBetter =
+              other.populationBenefit > candidate.populationBenefit ||
+              other.fairnessGain > candidate.fairnessGain ||
+              other.cost < candidate.cost ||
+              other.robustness > candidate.robustness;
+            return noWorse && strictlyBetter;
+          }),
+      );
+      ranked.push(...front.map((candidate) => ({ ...candidate, paretoRank })));
+      const frontKeys = new Set(
+        front.map(
+          (candidate) =>
+            `${candidate.zoneId}-${candidate.factor}-${candidate.parcel}`,
+        ),
+      );
+      remaining = remaining.filter(
+        (candidate) =>
+          !frontKeys.has(
+            `${candidate.zoneId}-${candidate.factor}-${candidate.parcel}`,
+          ),
+      );
+      paretoRank += 1;
+    }
+
+    return ranked
+      .sort(
+        (a, b) =>
+          a.paretoRank - b.paretoRank || b.objective - a.objective,
+      )
       .slice(0, 3)
       .map((candidate, index) => ({
         rank: index + 1,
@@ -556,7 +597,7 @@ export default function Home() {
         title: `新建${candidate.facility}`,
         place: `${candidate.zone.name} · ${candidate.parcel}`,
         impact: `价值 +${candidate.valueGain.toFixed(1)}`,
-        detail: `硬约束通过；公平指数 +${candidate.fairnessGain.toFixed(1)}，人口收益 ${candidate.populationBenefit.toFixed(1)}，成本 ${candidate.cost.toFixed(2)} 亿元。`,
+        detail: `硬约束通过 · 帕累托 F${candidate.paretoRank}；公平指数 +${candidate.fairnessGain.toFixed(1)}，人口收益 ${candidate.populationBenefit.toFixed(1)}，成本 ${candidate.cost.toFixed(2)} 亿元。`,
         score: candidate.robustness,
         tone: (["lime", "coral", "blue"] as const)[index],
       }));
