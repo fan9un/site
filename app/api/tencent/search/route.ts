@@ -5,6 +5,10 @@ const housingKeywords = [
   "学校",
   "幼儿园",
   "公交站",
+  "地铁站",
+  "BRT",
+  "轮渡码头",
+  "公共自行车",
   "养老院",
   "托育",
   "菜市场",
@@ -31,7 +35,8 @@ export async function POST(request: NextRequest) {
     mode?: "housing" | "worldcup";
   };
 
-  const key = body.key?.trim();
+  const key =
+    body.key?.trim() || process.env.TENCENT_MAP_SERVICE_KEY?.trim();
   const region = body.region?.trim();
   if (!key || !region) {
     return NextResponse.json(
@@ -43,38 +48,54 @@ export async function POST(request: NextRequest) {
   const keywords =
     body.mode === "worldcup" ? worldCupKeywords : housingKeywords;
 
-  const results = await Promise.all(
-    keywords.map(async (keyword) => {
-      const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
-      url.searchParams.set("boundary", `region(${region},0)`);
-      url.searchParams.set("keyword", keyword);
-      url.searchParams.set("page_size", "20");
-      url.searchParams.set("key", key);
+  const fetchKeyword = async (keyword: string) => {
+    const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
+    url.searchParams.set("boundary", `region(${region},2)`);
+    url.searchParams.set("keyword", keyword);
+    url.searchParams.set("page_size", "20");
+    url.searchParams.set("key", key);
 
-      const response = await fetch(url, {
+    let response: Response;
+    try {
+      response = await fetch(url, {
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) {
-        return { keyword, data: [] };
-      }
-      const payload = (await response.json()) as {
-        status?: number;
-        data?: Array<{
-          id?: string;
-          title?: string;
-          address?: string;
-          location?: { lat?: number; lng?: number };
-          category?: string;
-        }>;
-      };
-      return {
-        keyword,
-        data: payload.status === 0 ? payload.data ?? [] : [],
-      };
-    }),
-  );
+    } catch {
+      return { keyword, data: [], error: "network" };
+    }
+    if (!response.ok) {
+      return { keyword, data: [], error: `http-${response.status}` };
+    }
+    const payload = (await response.json()) as {
+      status?: number;
+      message?: string;
+      data?: Array<{
+        id?: string;
+        title?: string;
+        address?: string;
+        location?: { lat?: number; lng?: number };
+        category?: string;
+      }>;
+    };
+    return {
+      keyword,
+      data: payload.status === 0 ? payload.data ?? [] : [],
+      error: payload.status === 0 ? undefined : payload.message ?? "api-error",
+    };
+  };
 
-  const points = results.flatMap((result) =>
+  const results: Awaited<ReturnType<typeof fetchKeyword>>[] = [];
+  for (let index = 0; index < keywords.length; index += 2) {
+    const batch = await Promise.all(
+      keywords.slice(index, index + 2).map(fetchKeyword),
+    );
+    results.push(...batch);
+    if (index + 2 < keywords.length) {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    }
+  }
+
+  const rawPoints = results.flatMap((result) =>
     result.data.map((item) => ({
       id: item.id,
       name: item.title,
@@ -84,6 +105,14 @@ export async function POST(request: NextRequest) {
       lng: item.location?.lng,
     })),
   );
+  const points = Array.from(
+    new Map(
+      rawPoints.map((point) => [
+        point.id ?? `${point.name}-${point.lat}-${point.lng}`,
+        point,
+      ]),
+    ).values(),
+  );
 
   return NextResponse.json({
     region,
@@ -91,6 +120,7 @@ export async function POST(request: NextRequest) {
     categories: results.map((result) => ({
       name: result.keyword,
       count: result.data.length,
+      error: result.error,
     })),
     points,
   });

@@ -595,6 +595,12 @@ input[type="range"]::-webkit-slider-thumb {
   font-size: 9px;
 }
 
+.map-actions button.active {
+  border-color: #7aa796;
+  color: #235f4d;
+  background: #e6f2ec;
+}
+
 .map-canvas {
   position: relative;
   min-height: 430px;
@@ -603,6 +609,84 @@ input[type="range"]::-webkit-slider-thumb {
   background:
     radial-gradient(circle at 22% 28%, rgba(217, 255, 114, 0.18), transparent 21%),
     linear-gradient(145deg, #dce7dd, #cadbd6 52%, #dfe5d7);
+}
+
+.map-canvas.real-map {
+  background: #d7e0dc;
+}
+
+.real-map > .map-grid,
+.real-map > .water-shape,
+.real-map > .road,
+.real-map > .transport-network,
+.real-map > .zone,
+.real-map > .city-overview,
+.real-map > .region-overview,
+.real-map > .map-marker {
+  display: none;
+}
+
+.tencent-map-shell,
+.tencent-map-container {
+  position: absolute;
+  inset: 0;
+}
+
+.tencent-map-shell {
+  z-index: 0;
+  overflow: hidden;
+}
+
+.tencent-map-container {
+  background: #d7e0dc;
+}
+
+.tencent-map-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  color: #53655e;
+  background: rgba(251, 250, 245, 0.9);
+  box-shadow: 0 8px 24px rgba(10, 23, 20, 0.12);
+  font-size: 8px;
+  transform: translate(-50%, -50%);
+}
+
+.tencent-map-status.error {
+  color: #9c4c40;
+}
+
+.real-map-caption {
+  position: absolute;
+  right: 15px;
+  bottom: 51px;
+  z-index: 14;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 7px;
+  color: #4d6159;
+  background: rgba(251, 250, 245, 0.84);
+  box-shadow: 0 5px 18px rgba(10, 23, 20, 0.1);
+  backdrop-filter: blur(9px);
+}
+
+.real-map-caption b,
+.real-map-caption span {
+  display: block;
+}
+
+.real-map-caption b {
+  font-size: 7px;
+}
+
+.real-map-caption span {
+  margin-top: 2px;
+  color: #7a8782;
+  font-size: 6px;
 }
 
 .map-canvas.worldcup {
@@ -1278,6 +1362,26 @@ input[type="range"]::-webkit-slider-thumb {
   border-radius: 50% !important;
   background: var(--lime);
   box-shadow: 0 0 0 1px #7e9860;
+}
+
+.legend-node.real-zone {
+  background: var(--coral);
+  box-shadow: 0 0 0 1px #a7574b;
+}
+
+.legend-node.real-facility {
+  width: 6px;
+  height: 6px;
+  background: var(--blue);
+  box-shadow: 0 0 0 1px #527eac;
+}
+
+.legend-water {
+  width: 16px;
+  height: 8px;
+  display: inline-block;
+  border-radius: 2px;
+  background: rgba(69, 155, 202, 0.52);
 }
 
 .legend-context {

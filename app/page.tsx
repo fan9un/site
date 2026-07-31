@@ -41,11 +41,15 @@ import {
   Wind,
   type LucideIcon,
 } from "lucide-react";
+import TencentPlanningMap, {
+  type PlanningMapPoint,
+} from "./TencentPlanningMap";
 
 type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
 type HousingRing = "inner" | "middle" | "outer";
 type MapScale = "local" | "city" | "region";
+type MapView = "real" | "schematic";
 type Coord = { lat: number; lng: number };
 type DecayType = "gaussian" | "exponential" | "gravity";
 type TransportMode =
@@ -1412,6 +1416,7 @@ function deterministicNoise(sample: number, key: string) {
 export default function Home() {
   const [mode, setMode] = useState<Mode>("housing");
   const [mapScale, setMapScale] = useState<MapScale>("local");
+  const [mapView, setMapView] = useState<MapView>("real");
   const [activeHousingId, setActiveHousingId] = useState("donggang");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
@@ -1424,6 +1429,9 @@ export default function Home() {
   const [importKey, setImportKey] = useState("");
   const [importRegion, setImportRegion] = useState("厦门市湖里区");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [importedMapPoints, setImportedMapPoints] = useState<
+    PlanningMapPoint[]
+  >([]);
   const [customFacilities, setCustomFacilities] = useState<string[]>([]);
   const [manualName, setManualName] = useState("");
   const [manualType, setManualType] = useState("社区卫生服务中心");
@@ -1441,6 +1449,8 @@ export default function Home() {
     () => generateCandidates(landParcels, housingZones),
     [],
   );
+  const tencentMapKey =
+    process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim() ?? "";
 
   const housingScores = useMemo(() => {
     const prices = housingZones.map((zone) => zone.price);
@@ -1469,6 +1479,28 @@ export default function Home() {
       };
     });
   }, [forecastYear]);
+
+  const realMapPoints = useMemo<PlanningMapPoint[]>(
+    () => [
+      ...housingScores.map((zone) => ({
+        id: zone.id,
+        name: zone.name,
+        lat: zone.coord.lat,
+        lng: zone.coord.lng,
+        kind: "zone" as const,
+        score: zone.score,
+      })),
+      ...existingFacilities.map((facility) => ({
+        id: facility.id,
+        name: facility.name,
+        lat: facility.lat,
+        lng: facility.lng,
+        kind: "facility" as const,
+      })),
+      ...importedMapPoints,
+    ],
+    [housingScores, importedMapPoints],
+  );
 
   const fairness = fairnessIndex(
     housingScores.map((zone) => zone.equityScore),
@@ -1693,13 +1725,6 @@ export default function Home() {
   async function handleTencentImport(event: FormEvent) {
     event.preventDefault();
     setImportStatus("loading");
-    if (!importKey.trim()) {
-      window.setTimeout(() => {
-        setImportStatus("done");
-        showToast("已导入 126 个演示 POI，并完成距离矩阵计算");
-      }, 850);
-      return;
-    }
     try {
       const response = await fetch("/api/tencent/search", {
         method: "POST",
@@ -1711,9 +1736,34 @@ export default function Home() {
         }),
       });
       if (!response.ok) throw new Error("import failed");
-      const result = (await response.json()) as { count?: number };
+      const result = (await response.json()) as {
+        count?: number;
+        points?: Array<{
+          id?: string;
+          name?: string;
+          lat?: number;
+          lng?: number;
+        }>;
+      };
+      const validPoints: PlanningMapPoint[] = (result.points ?? [])
+        .filter(
+          (point) =>
+            typeof point.lat === "number" &&
+            typeof point.lng === "number",
+        )
+        .map((point, index) => ({
+          id: point.id ?? `tencent-${index}`,
+          name: point.name ?? "腾讯地图 POI",
+          lat: point.lat!,
+          lng: point.lng!,
+          kind: "imported",
+        }));
+      setImportedMapPoints(validPoints);
       setImportStatus("done");
-      showToast(`已从腾讯地图导入 ${result.count ?? 0} 个 POI`);
+      setMapView("real");
+      showToast(
+        `已从腾讯地图导入 ${result.count ?? validPoints.length} 个 POI，并叠加到真实底图`,
+      );
     } catch {
       setImportStatus("error");
     }
@@ -1961,11 +2011,33 @@ export default function Home() {
             <div className="map-actions">
               <button onClick={() => showToast("已聚焦全部分析对象")}>⌖ 全域</button>
               <button onClick={() => setPanel("import")}>⇩ 导入数据</button>
-              <button onClick={() => showToast("底图已切换：规划用地")}>▱ 图层</button>
+              {mode === "housing" && (
+                <button
+                  className={mapView === "real" ? "active" : ""}
+                  onClick={() =>
+                    setMapView(mapView === "real" ? "schematic" : "real")
+                  }
+                >
+                  ▱ {mapView === "real" ? "真实地图" : "分析沙盘"}
+                </button>
+              )}
             </div>
           </div>
 
-          <div className={`map-canvas ${mode} zoom-${mapScale}`}>
+          <div
+            className={`map-canvas ${mode} zoom-${mapScale} ${
+              mode === "housing" && mapView === "real" ? "real-map" : ""
+            }`}
+          >
+            {mode === "housing" && mapView === "real" && (
+              <TencentPlanningMap
+                apiKey={tencentMapKey}
+                scale={mapScale}
+                points={realMapPoints}
+                activeZoneId={activeHousingId}
+                onZoneSelect={setActiveHousingId}
+              />
+            )}
             <div className="map-grid" />
             <div className="water-shape" />
             <div className="road road-one" />
@@ -2161,7 +2233,14 @@ export default function Home() {
 
             <div className="map-legend">
               {mode === "housing" ? (
-                mapScale === "local" ? (
+                mapView === "real" ? (
+                  <>
+                    <span><i className="legend-node real-zone" />社区价值点</span>
+                    <span><i className="legend-node real-facility" />设施 / POI</span>
+                    <span><i className="legend-line road" />真实路网</span>
+                    <span><i className="legend-water" />海岸线与水域</span>
+                  </>
+                ) : mapScale === "local" ? (
                   <>
                     <span><i className="legend-line walk" />步行支路</span>
                     <span><i className="legend-line cycle" />自行车绿道</span>
@@ -2489,7 +2568,7 @@ export default function Home() {
                 <span className="modal-kicker">DATA CONNECTOR</span>
                 <h2>从腾讯地图建立真实空间样本</h2>
                 <p className="modal-lead">
-                  输入 WebService Key 后，系统按设施类别检索 POI并保留坐标；容量与品质可由开放数据补齐或人工校核，再进入距离衰减模型。没有 Key 也可载入同结构演示数据。
+                  系统已配置服务端 WebService Key，可按设施类别检索真实 POI 并保留坐标；容量与品质仍需由开放数据补齐或人工校核，再进入距离衰减模型。
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -2497,11 +2576,11 @@ export default function Home() {
                     <input value={importRegion} onChange={(event) => setImportRegion(event.target.value)} />
                   </label>
                   <label>
-                    腾讯位置服务 Key <span>（可选）</span>
+                    临时覆盖 Key <span>（可选，不会保存）</span>
                     <input
                       value={importKey}
                       onChange={(event) => setImportKey(event.target.value)}
-                      placeholder="留空则导入厦门湖里演示样本"
+                      placeholder="留空则使用已安全配置的服务端 Key"
                       type="password"
                     />
                   </label>
@@ -2518,9 +2597,7 @@ export default function Home() {
                   <button className="modal-submit" disabled={importStatus === "loading"}>
                     {importStatus === "loading"
                       ? "正在建立空间索引…"
-                      : importKey
-                        ? "连接并导入"
-                        : "载入演示数据"}
+                      : "从腾讯地图导入真实 POI"}
                   </button>
                 </form>
               </>
