@@ -192,6 +192,7 @@ type Recommendation = {
   detail: string;
   score: number;
   tone: "lime" | "coral" | "blue";
+  sourceId?: string;
 };
 
 type PortfolioEvaluation = {
@@ -1681,6 +1682,7 @@ export default function Home() {
   const [mapScale, setMapScale] = useState<MapScale>("local");
   const [mapView, setMapView] = useState<MapView>("real");
   const [activeHousingId, setActiveHousingId] = useState("donggang");
+  const [activeRecommendationId, setActiveRecommendationId] = useState("");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
   const [budget, setBudget] = useState(3.2);
@@ -1751,7 +1753,7 @@ export default function Home() {
     });
   }, [analysisScenario, forecastYear]);
 
-  const realMapPoints = useMemo<PlanningMapPoint[]>(
+  const baseRealMapPoints = useMemo<PlanningMapPoint[]>(
     () => [
       ...housingScores.map((zone) => ({
         id: zone.id,
@@ -1816,6 +1818,64 @@ export default function Home() {
     [analysisScenario, budget, fairnessWeight, forecastYear, generatedCandidates],
   );
 
+  const recommendationMapPoints = useMemo<PlanningMapPoint[]>(
+    () =>
+      housingOptimization.selected.slice(0, 3).map((candidate, index) => ({
+        id: candidate.id,
+        name: candidate.facility,
+        lat: candidate.center.lat,
+        lng: candidate.center.lng,
+        kind: "recommendation" as const,
+        rank: index + 1,
+        serviceRadiusKm: facilityTypeConfig[candidate.factor]?.serviceRadius ?? 1,
+      })),
+    [housingOptimization.selected],
+  );
+
+  const realMapPoints = useMemo<PlanningMapPoint[]>(
+    () => [...baseRealMapPoints, ...recommendationMapPoints],
+    [baseRealMapPoints, recommendationMapPoints],
+  );
+
+  const recommendationSchematicPoints = useMemo(() => {
+    const selected = housingOptimization.selected.slice(0, 3);
+    const coords = [
+      ...analysisScenario.zones.map((zone) => zone.coord),
+      ...selected.map((candidate) => candidate.center),
+    ];
+    const latitudes = coords.map((coord) => coord.lat);
+    const longitudes = coords.map((coord) => coord.lng);
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLng = Math.min(...longitudes);
+    const maxLng = Math.max(...longitudes);
+    const latSpan = Math.max(0.001, maxLat - minLat);
+    const lngSpan = Math.max(0.001, maxLng - minLng);
+    return selected.map((candidate, index) => ({
+      candidate,
+      rank: index + 1,
+      x: 12 + ((candidate.center.lng - minLng) / lngSpan) * 76,
+      y: 88 - ((candidate.center.lat - minLat) / latSpan) * 76,
+      radius:
+        mapScale === "local"
+          ? Math.min(154, Math.max(58, facilityTypeConfig[candidate.factor].serviceRadius * 24))
+          : mapScale === "city"
+            ? Math.min(92, Math.max(38, facilityTypeConfig[candidate.factor].serviceRadius * 9))
+            : 34,
+    }));
+  }, [analysisScenario.zones, housingOptimization.selected, mapScale]);
+
+  useEffect(() => {
+    const selected = housingOptimization.selected;
+    if (!selected.length) {
+      setActiveRecommendationId("");
+      return;
+    }
+    if (!selected.some((candidate) => candidate.id === activeRecommendationId)) {
+      setActiveRecommendationId(selected[0].id);
+    }
+  }, [activeRecommendationId, housingOptimization.selected]);
+
   const housingRecommendations = useMemo<Recommendation[]>(() => {
     const baseEvaluation = evaluatePortfolio(
       [],
@@ -1865,6 +1925,7 @@ export default function Home() {
         detail: `组合方案成员 · 影响 ${affectedZones.length} 个社区；全生命周期成本 ${candidate.cost.toFixed(2)} 亿元，预计 ${candidate.openingYear} 年投用，组合公平指数 +${fairnessGain.toFixed(1)}。`,
         score: Math.round(candidate.robustness),
         tone: (["lime", "coral", "blue"] as const)[index],
+        sourceId: candidate.id,
       };
     });
   }, [analysisScenario, fairnessWeight, forecastYear, housingOptimization]);
@@ -2106,6 +2167,19 @@ export default function Home() {
     setMapScale("local");
     setMapView("real");
     showToast("已恢复厦门市湖里区内置演示场景");
+  }
+
+  function activateRecommendation(recommendationId: string, openRealMap = false) {
+    const candidate = housingOptimization.selected.find(
+      (item) => item.id === recommendationId,
+    );
+    if (!candidate) return;
+    setActiveRecommendationId(recommendationId);
+    if (openRealMap) {
+      setMapScale("local");
+      setMapView("real");
+    }
+    showToast(`已定位方案：${candidate.facility} · ${candidate.parcelName}`);
   }
 
   function handleManualAdd(event: FormEvent) {
@@ -2410,8 +2484,19 @@ export default function Home() {
                 center={analysisScenario.center}
                 points={realMapPoints}
                 activeZoneId={activeHousingId}
+                activeRecommendationId={activeRecommendationId}
                 onZoneSelect={setActiveHousingId}
+                onRecommendationSelect={(recommendationId) =>
+                  activateRecommendation(recommendationId)
+                }
               />
+            )}
+            {mode === "housing" && housingOptimization.selected.length > 0 && (
+              <div className="optimization-map-status">
+                <span>组合建议已上图</span>
+                <b>{housingOptimization.selected.length} 处</b>
+                <small>编号与右侧卡片一致 · 圆圈为设施服务半径</small>
+              </div>
             )}
             <div className="map-grid" />
             <div className="water-shape" />
@@ -2581,12 +2666,35 @@ export default function Home() {
               </button>
             ))}
 
+            {mode === "housing" && mapView === "schematic" &&
+              recommendationSchematicPoints.map(({ candidate, rank, x, y, radius }) => (
+                <button
+                  key={candidate.id}
+                  className={`proposed-site ${activeRecommendationId === candidate.id ? "active" : ""}`}
+                  style={
+                    {
+                      "--site-x": `${x}%`,
+                      "--site-y": `${y}%`,
+                      "--service-diameter": `${radius}px`,
+                    } as CSSProperties
+                  }
+                  aria-pressed={activeRecommendationId === candidate.id}
+                  aria-label={`方案 ${rank}：${candidate.facility}，${candidate.parcelName}`}
+                  onClick={() => activateRecommendation(candidate.id)}
+                >
+                  <i>0{rank}</i>
+                  <span>{candidate.facility}</span>
+                  <small>{candidate.parcelName}</small>
+                </button>
+              ))}
+
             <div className="map-legend">
               {mode === "housing" ? (
                 mapView === "real" ? (
                   <>
                     <span><i className="legend-node real-zone" />社区价值点</span>
                     <span><i className="legend-node real-facility" />设施 / POI</span>
+                    <span><i className="legend-proposed" />组合建议与服务圈</span>
                     <span><i className="legend-line road" />真实路网</span>
                     <span><i className="legend-water" />海岸线与水域</span>
                   </>
@@ -2596,6 +2704,7 @@ export default function Home() {
                     <span><i className="legend-line cycle" />自行车绿道</span>
                     <span><i className="legend-line bus" />公交 / BRT</span>
                     <span><i className="legend-line metro" />地铁与站点</span>
+                    <span><i className="legend-proposed" />组合建议</span>
                   </>
                 ) : mapScale === "city" ? (
                   <>
@@ -2603,6 +2712,7 @@ export default function Home() {
                     <span><i className="legend-line brt" />BRT</span>
                     <span><i className="legend-line road" />快速路</span>
                     <span><i className="legend-line ferry" />跨海轮渡</span>
+                    <span><i className="legend-proposed" />组合建议</span>
                   </>
                 ) : (
                   <>
@@ -2610,6 +2720,7 @@ export default function Home() {
                     <span><i className="legend-line road" />高速公路</span>
                     <span><i className="legend-node" />城市节点</span>
                     <span><i className="legend-context" />共享区域背景</span>
+                    <span><i className="legend-proposed" />组合建议</span>
                   </>
                 )
               ) : (
@@ -2830,7 +2941,12 @@ export default function Home() {
               </div>
             )}
             {recommendations.map((item) => (
-              <article className="recommendation-card" key={item.rank}>
+              <article
+                className={`recommendation-card ${
+                  item.sourceId === activeRecommendationId ? "map-active" : ""
+                }`}
+                key={item.rank}
+              >
                 <div className={`rank ${item.tone}`}>0{item.rank}</div>
                 <div className="recommendation-copy">
                   <span className={`recommendation-type ${item.tone}`}>{item.type}</span>
@@ -2841,6 +2957,15 @@ export default function Home() {
                     <strong>{item.impact}</strong>
                     <span>置信度 {item.score}%</span>
                   </div>
+                  {mode === "housing" && item.sourceId && (
+                    <button
+                      className="map-locate"
+                      onClick={() => activateRecommendation(item.sourceId!, true)}
+                    >
+                      <MapPinned size={12} />
+                      在地图定位方案 0{item.rank}
+                    </button>
+                  )}
                 </div>
               </article>
             ))}

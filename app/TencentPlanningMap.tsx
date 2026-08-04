@@ -9,8 +9,10 @@ export type PlanningMapPoint = {
   name: string;
   lat: number;
   lng: number;
-  kind: "zone" | "facility" | "imported";
+  kind: "zone" | "facility" | "imported" | "recommendation";
   score?: number;
+  rank?: number;
+  serviceRadiusKm?: number;
 };
 
 type TencentMapInstance = {
@@ -39,6 +41,8 @@ declare global {
       MarkerStyle: new (options: Record<string, unknown>) => unknown;
       MultiLabel: new (options: Record<string, unknown>) => TencentLayer;
       LabelStyle: new (options: Record<string, unknown>) => unknown;
+      MultiCircle?: new (options: Record<string, unknown>) => TencentLayer;
+      CircleStyle?: new (options: Record<string, unknown>) => unknown;
     };
   }
 }
@@ -84,19 +88,24 @@ export default function TencentPlanningMap({
   center,
   points,
   activeZoneId,
+  activeRecommendationId,
   onZoneSelect,
+  onRecommendationSelect,
 }: {
   apiKey: string;
   scale: MapScale;
   center: { lat: number; lng: number };
   points: PlanningMapPoint[];
   activeZoneId: string;
+  activeRecommendationId: string;
   onZoneSelect: (zoneId: string) => void;
+  onRecommendationSelect: (recommendationId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<TencentMapInstance | null>(null);
   const markerLayerRef = useRef<TencentLayer | null>(null);
   const labelLayerRef = useRef<TencentLayer | null>(null);
+  const circleLayerRef = useRef<TencentLayer | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     apiKey ? "loading" : "error",
   );
@@ -132,6 +141,7 @@ export default function TencentPlanningMap({
       cancelled = true;
       markerLayerRef.current?.destroy?.();
       labelLayerRef.current?.destroy?.();
+      circleLayerRef.current?.destroy?.();
       mapRef.current?.destroy?.();
       mapRef.current = null;
     };
@@ -150,21 +160,31 @@ export default function TencentPlanningMap({
   useEffect(() => {
     const map = mapRef.current;
     const TMap = window.TMap;
+    if (!map || !TMap || status !== "ready" || !activeRecommendationId) return;
+    const recommendation = points.find(
+      (point) =>
+        point.kind === "recommendation" && point.id === activeRecommendationId,
+    );
+    if (!recommendation) return;
+    map.setCenter(new TMap.LatLng(recommendation.lat, recommendation.lng));
+    if (scale === "local") map.setZoom(14.2);
+  }, [activeRecommendationId, points, scale, status]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const TMap = window.TMap;
     if (!map || !TMap || status !== "ready") return;
 
     markerLayerRef.current?.destroy?.();
     labelLayerRef.current?.destroy?.();
+    circleLayerRef.current?.destroy?.();
 
     const visiblePoints =
       scale === "local"
         ? points
-        : points.filter((point) => point.kind === "zone");
-    const activePoints = visiblePoints.filter(
-      (point) => point.id === activeZoneId,
-    );
-    const regularPoints = visiblePoints.filter(
-      (point) => point.id !== activeZoneId,
-    );
+        : points.filter(
+            (point) => point.kind === "zone" || point.kind === "recommendation",
+          );
     const markerLayer = new TMap.MultiMarker({
       id: "planning-points",
       map,
@@ -187,21 +207,34 @@ export default function TencentPlanningMap({
           anchor: { x: 8, y: 24 },
           src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
         }),
+        recommendation: new TMap.MarkerStyle({
+          width: 34,
+          height: 47,
+          anchor: { x: 17, y: 47 },
+          src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
+        }),
+        recommendationActive: new TMap.MarkerStyle({
+          width: 43,
+          height: 59,
+          anchor: { x: 21, y: 59 },
+          src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
+        }),
       },
-      geometries: [
-        ...regularPoints.map((point) => ({
+      geometries: visiblePoints.map((point) => ({
           id: point.id,
-          styleId: point.kind === "zone" ? "zone" : "facility",
+          styleId:
+            point.kind === "recommendation"
+              ? point.id === activeRecommendationId
+                ? "recommendationActive"
+                : "recommendation"
+              : point.id === activeZoneId
+                ? "active"
+                : point.kind === "zone"
+                  ? "zone"
+                  : "facility",
           position: new TMap.LatLng(point.lat, point.lng),
           properties: { kind: point.kind },
         })),
-        ...activePoints.map((point) => ({
-          id: point.id,
-          styleId: "active",
-          position: new TMap.LatLng(point.lat, point.lng),
-          properties: { kind: point.kind },
-        })),
-      ],
     });
     markerLayer.on?.("click", (event) => {
       if (
@@ -209,11 +242,19 @@ export default function TencentPlanningMap({
         event.geometry.id
       ) {
         onZoneSelect(event.geometry.id);
+      } else if (
+        event.geometry?.properties?.kind === "recommendation" &&
+        event.geometry.id
+      ) {
+        onRecommendationSelect(event.geometry.id);
       }
     });
     markerLayerRef.current = markerLayer;
 
     const zones = points.filter((point) => point.kind === "zone");
+    const recommendations = visiblePoints.filter(
+      (point) => point.kind === "recommendation",
+    );
     labelLayerRef.current = new TMap.MultiLabel({
       id: "planning-labels",
       map,
@@ -225,15 +266,67 @@ export default function TencentPlanningMap({
           alignment: "center",
           verticalAlignment: "middle",
         }),
+        recommendation: new TMap.LabelStyle({
+          color: "#a84235",
+          size: 14,
+          offset: { x: 0, y: -59 },
+          alignment: "center",
+          verticalAlignment: "middle",
+        }),
       },
-      geometries: zones.map((point) => ({
-        id: `label-${point.id}`,
-        styleId: "zone",
-        position: new TMap.LatLng(point.lat, point.lng),
-        content: `${point.name}${point.score === undefined ? "" : ` · ${point.score.toFixed(0)}`}`,
-      })),
+      geometries: [
+        ...zones.map((point) => ({
+          id: `label-${point.id}`,
+          styleId: "zone",
+          position: new TMap.LatLng(point.lat, point.lng),
+          content: `${point.name}${point.score === undefined ? "" : ` · ${point.score.toFixed(0)}`}`,
+        })),
+        ...recommendations.map((point) => ({
+          id: `label-${point.id}`,
+          styleId: "recommendation",
+          position: new TMap.LatLng(point.lat, point.lng),
+          content: `方案 0${point.rank ?? ""} · ${point.name}`,
+        })),
+      ],
     });
-  }, [activeZoneId, onZoneSelect, points, scale, status]);
+
+    const MultiCircle = TMap.MultiCircle;
+    const CircleStyle = TMap.CircleStyle;
+    if (MultiCircle && CircleStyle && recommendations.length) {
+      circleLayerRef.current = new MultiCircle({
+        id: "recommendation-service-circles",
+        map,
+        styles: {
+          recommendation: new CircleStyle({
+            color: "rgba(223, 124, 99, 0.12)",
+            showBorder: true,
+            borderColor: "rgba(190, 78, 61, 0.72)",
+            borderWidth: 2,
+          }),
+          active: new CircleStyle({
+            color: "rgba(160, 193, 73, 0.18)",
+            showBorder: true,
+            borderColor: "rgba(98, 128, 35, 0.92)",
+            borderWidth: 3,
+          }),
+        },
+        geometries: recommendations.map((point) => ({
+          id: `circle-${point.id}`,
+          styleId: point.id === activeRecommendationId ? "active" : "recommendation",
+          center: new TMap.LatLng(point.lat, point.lng),
+          radius: Math.max(250, (point.serviceRadiusKm ?? 1) * 1000),
+        })),
+      });
+    }
+  }, [
+    activeRecommendationId,
+    activeZoneId,
+    onRecommendationSelect,
+    onZoneSelect,
+    points,
+    scale,
+    status,
+  ]);
 
   return (
     <div className="tencent-map-shell">

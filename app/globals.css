@@ -766,6 +766,45 @@ input[type="range"]::-webkit-slider-thumb {
   display: block;
 }
 
+.optimization-map-status {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 215px;
+  padding: 9px 12px;
+  border: 1px solid rgba(167, 75, 59, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 250, 244, 0.92);
+  box-shadow: 0 8px 24px rgba(29, 43, 38, 0.14);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.optimization-map-status span {
+  color: #9e4437;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.optimization-map-status b {
+  justify-self: end;
+  color: #b54d3e;
+  font: 850 10px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.optimization-map-status small {
+  grid-column: 1 / -1;
+  color: #7c8883;
+  font-size: 6px;
+}
+
 .real-map-caption b {
   font-size: 7px;
 }
@@ -1332,6 +1371,106 @@ input[type="range"]::-webkit-slider-thumb {
   height: 24px;
   border-width: 2px;
   opacity: 0.88;
+}
+
+.proposed-site {
+  --site-x: 50%;
+  --site-y: 50%;
+  --service-diameter: 72px;
+  position: absolute;
+  left: var(--site-x);
+  top: var(--site-y);
+  z-index: 22;
+  width: 116px;
+  display: grid;
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+}
+
+.proposed-site::before {
+  width: var(--service-diameter);
+  height: var(--service-diameter);
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  z-index: -1;
+  border: 2px dashed rgba(190, 78, 61, 0.72);
+  border-radius: 50%;
+  background: rgba(223, 124, 99, 0.12);
+  content: "";
+  transform: translate(-50%, -50%);
+  transition: 180ms ease;
+  pointer-events: none;
+}
+
+.proposed-site > i {
+  width: 35px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  border: 4px solid white;
+  border-radius: 50% 50% 50% 10%;
+  color: white;
+  background: #c65343;
+  box-shadow: 0 0 0 2px #a94336, 0 9px 22px rgba(101, 45, 36, 0.28);
+  font: 900 10px ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-style: normal;
+  transform: rotate(-45deg);
+}
+
+.proposed-site > i::first-letter {
+  transform: rotate(45deg);
+}
+
+.proposed-site > span,
+.proposed-site > small {
+  position: relative;
+  max-width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proposed-site > span {
+  margin-top: 5px;
+  padding: 5px 7px 3px;
+  border-radius: 6px 6px 0 0;
+  color: white;
+  background: #953d32;
+  box-shadow: 0 5px 14px rgba(53, 40, 34, 0.16);
+  font-size: 7px;
+  font-weight: 900;
+}
+
+.proposed-site > small {
+  padding: 2px 6px 4px;
+  border-radius: 0 0 6px 6px;
+  color: #6e7a75;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 6px;
+}
+
+.proposed-site:hover,
+.proposed-site.active {
+  z-index: 26;
+}
+
+.proposed-site:hover::before,
+.proposed-site.active::before {
+  border-style: solid;
+  border-color: #6f932b;
+  background: rgba(168, 198, 76, 0.2);
+  transform: translate(-50%, -50%) scale(1.07);
+}
+
+.proposed-site.active > i {
+  background: #789b2d;
+  box-shadow: 0 0 0 3px #d7ed8d, 0 10px 25px rgba(76, 98, 30, 0.3);
 }
 
 .stadium-ring {
@@ -1903,6 +2042,12 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 9px 24px rgba(10, 23, 20, 0.08);
 }
 
+.recommendation-card.map-active {
+  border-color: #789b2d;
+  background: #fbfff1;
+  box-shadow: inset 3px 0 #91b13a, 0 9px 24px rgba(69, 91, 25, 0.1);
+}
+
 .rank {
   height: 27px;
   display: grid;
@@ -1946,6 +2091,29 @@ input[type="range"]::-webkit-slider-thumb {
   color: #6f7c78;
   font-size: 7px;
   line-height: 1.55;
+}
+
+.map-locate {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid #cad7b2;
+  border-radius: 7px;
+  color: #4d6d28;
+  background: #f4f9e8;
+  font-size: 7px;
+  font-weight: 850;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.map-locate:hover {
+  border-color: #8aa743;
+  background: #eaf4cf;
 }
 
 .recommendation-meta {
