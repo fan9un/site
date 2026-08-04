@@ -357,6 +357,64 @@ input[type="range"]::-webkit-slider-thumb {
   line-height: 1.5;
 }
 
+.lifecycle-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.lifecycle-summary span {
+  padding: 6px 3px;
+  border-radius: 6px;
+  color: #74817c;
+  background: #eef1ea;
+  font-size: 6px;
+  text-align: center;
+}
+
+.lifecycle-summary b {
+  display: block;
+  margin-bottom: 2px;
+  color: #315f50;
+  font: 800 8px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.data-provenance {
+  margin: -8px 0 16px;
+  padding: 10px;
+  border: 1px solid #d6dbd3;
+  border-left: 3px solid #8ba638;
+  border-radius: 9px;
+  background: #f7f7f1;
+}
+
+.data-provenance.proxy {
+  border-left-color: #df7c63;
+  background: #fff7f2;
+}
+
+.data-provenance > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.data-provenance b { font-size: 8px; }
+.data-provenance span { color: #7b8883; font-size: 6px; }
+.data-provenance p { margin: 6px 0 0; color: #74817c; font-size: 7px; line-height: 1.5; }
+.data-provenance button {
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+  color: #33755f;
+  background: transparent;
+  font-size: 7px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .factor-heading {
   justify-content: space-between;
   margin-bottom: 11px;
@@ -476,7 +534,8 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .transport-breakdown > div,
-.transport-breakdown > p {
+.transport-breakdown > p,
+.transport-breakdown > details {
   grid-column: 1 / -1;
 }
 
@@ -520,6 +579,34 @@ input[type="range"]::-webkit-slider-thumb {
   color: #85918c;
   font-size: 7px;
   line-height: 1.5;
+}
+
+.transport-breakdown details {
+  padding-top: 3px;
+  border-top: 1px solid #dce1da;
+}
+
+.transport-breakdown summary {
+  color: #376f5c;
+  font-size: 7px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.transport-breakdown details p,
+.transport-breakdown details ul {
+  margin: 6px 0 0;
+  color: #788680;
+  font-size: 7px;
+  line-height: 1.55;
+}
+
+.transport-breakdown details ul {
+  padding-left: 14px;
+}
+
+.transport-breakdown details li + li {
+  margin-top: 4px;
 }
 
 .model-link {
@@ -2147,6 +2234,19 @@ input[type="range"]::-webkit-slider-thumb {
   background: var(--lime);
   font-size: 11px;
   font-weight: 850;
+  cursor: pointer;
+}
+
+.modal-secondary {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px solid #cdd5ce;
+  border-radius: 9px;
+  color: #486159;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 800;
   cursor: pointer;
 }
 

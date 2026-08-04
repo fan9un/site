@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const housingKeywords = [
+  "住宅小区",
   "医院",
   "学校",
   "幼儿园",
@@ -15,6 +16,9 @@ const housingKeywords = [
   "公园",
   "商场",
   "餐厅",
+  "图书馆",
+  "派出所",
+  "火车站",
 ];
 
 const worldCupKeywords = [
@@ -105,14 +109,23 @@ export async function POST(request: NextRequest) {
       lng: item.location?.lng,
     })),
   );
-  const points = Array.from(
-    new Map(
-      rawPoints.map((point) => [
-        point.id ?? `${point.name}-${point.lat}-${point.lng}`,
-        point,
-      ]),
-    ).values(),
-  );
+  const pointIndex = new Map<string, (typeof rawPoints)[number]>();
+  rawPoints.forEach((point) => {
+    const id = point.id ?? `${point.name}-${point.lat}-${point.lng}`;
+    const previous = pointIndex.get(id);
+    if (!previous) {
+      pointIndex.set(id, point);
+      return;
+    }
+    const categories = new Set(
+      `${previous.category}|${point.category}`.split("|").filter(Boolean),
+    );
+    pointIndex.set(id, {
+      ...previous,
+      category: Array.from(categories).join("|"),
+    });
+  });
+  const points = Array.from(pointIndex.values());
 
   return NextResponse.json({
     region,

@@ -62,20 +62,17 @@ function loadTencentMap(key: string) {
 
 const scaleViews: Record<
   MapScale,
-  { center: { lat: number; lng: number }; zoom: number; pitch: number }
+  { zoom: number; pitch: number }
 > = {
   local: {
-    center: { lat: 24.5127, lng: 118.1392 },
     zoom: 13.4,
     pitch: 24,
   },
   city: {
-    center: { lat: 24.5055, lng: 118.1086 },
     zoom: 10.7,
     pitch: 12,
   },
   region: {
-    center: { lat: 25.25, lng: 118.55 },
     zoom: 7.2,
     pitch: 0,
   },
@@ -84,12 +81,14 @@ const scaleViews: Record<
 export default function TencentPlanningMap({
   apiKey,
   scale,
+  center,
   points,
   activeZoneId,
   onZoneSelect,
 }: {
   apiKey: string;
   scale: MapScale;
+  center: { lat: number; lng: number };
   points: PlanningMapPoint[];
   activeZoneId: string;
   onZoneSelect: (zoneId: string) => void;
@@ -113,7 +112,7 @@ export default function TencentPlanningMap({
         if (cancelled || !containerRef.current || !window.TMap) return;
         const view = scaleViews[scale];
         const map = new window.TMap.Map(containerRef.current, {
-          center: new window.TMap.LatLng(view.center.lat, view.center.lng),
+          center: new window.TMap.LatLng(center.lat, center.lng),
           zoom: view.zoom,
           pitch: view.pitch,
           rotation: 0,
@@ -143,10 +142,10 @@ export default function TencentPlanningMap({
     const TMap = window.TMap;
     if (!map || !TMap) return;
     const view = scaleViews[scale];
-    map.setCenter(new TMap.LatLng(view.center.lat, view.center.lng));
+    map.setCenter(new TMap.LatLng(center.lat, center.lng));
     map.setZoom(view.zoom);
     map.setPitch(view.pitch);
-  }, [scale, status]);
+  }, [center.lat, center.lng, scale, status]);
 
   useEffect(() => {
     const map = mapRef.current;
