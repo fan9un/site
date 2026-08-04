@@ -64,6 +64,7 @@ export function assessCandidateSuitability(
     return {
       eligible: true,
       score: 72,
+      verified: false,
       notes: ["未取得机场、港口等冲突源数据，需规划核验"],
     };
   }
@@ -85,6 +86,7 @@ export function assessCandidateSuitability(
     return {
       eligible: false,
       score: 0,
+      verified: true,
       notes: [
         `距${constraintLabels[blocked.constraint.kind]} ${blocked.distance.toFixed(1)}km，小于 ${blocked.hardRadius.toFixed(1)}km 避让线`,
       ],
@@ -103,6 +105,7 @@ export function assessCandidateSuitability(
   return {
     eligible: true,
     score: Math.max(35, 100 - Math.min(65, penalty)),
+    verified: true,
     notes: nearestAudits.map((audit) =>
       audit.hardRadius > 0
         ? `距${constraintLabels[audit.constraint.kind]} ${audit.distance.toFixed(1)}km（红线 ${audit.hardRadius.toFixed(1)}km）`

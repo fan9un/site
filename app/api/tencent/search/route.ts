@@ -74,41 +74,56 @@ export async function POST(request: NextRequest) {
     let lastError = "api-error";
     for (let offset = 0; offset < keyCandidates.length; offset += 1) {
       const keyIndex = (activeKeyIndex + offset) % keyCandidates.length;
-      const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
-      url.searchParams.set("boundary", `region(${region},2)`);
-      url.searchParams.set("keyword", keyword);
-      url.searchParams.set("page_size", "20");
-      url.searchParams.set("key", keyCandidates[keyIndex]);
+      const collected: Array<{
+        id?: string;
+        title?: string;
+        address?: string;
+        location?: { lat?: number; lng?: number };
+        category?: string;
+      }> = [];
+      let keyFailed = false;
+      for (let pageIndex = 1; pageIndex <= 3; pageIndex += 1) {
+        const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
+        url.searchParams.set("boundary", `region(${region},2)`);
+        url.searchParams.set("keyword", keyword);
+        url.searchParams.set("page_size", "20");
+        url.searchParams.set("page_index", String(pageIndex));
+        url.searchParams.set("key", keyCandidates[keyIndex]);
 
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          headers: { Accept: "application/json" },
-        });
-      } catch {
-        lastError = "network";
-        continue;
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            headers: { Accept: "application/json" },
+          });
+        } catch {
+          lastError = "network";
+          keyFailed = true;
+          break;
+        }
+        if (!response.ok) {
+          lastError = `http-${response.status}`;
+          keyFailed = true;
+          break;
+        }
+        const payload = (await response.json()) as {
+          status?: number;
+          message?: string;
+          data?: typeof collected;
+        };
+        if (payload.status !== 0) {
+          lastError = payload.message ?? "api-error";
+          keyFailed = true;
+          break;
+        }
+        const page = payload.data ?? [];
+        collected.push(...page);
+        if (page.length < 20) break;
+        await new Promise((resolve) => setTimeout(resolve, 90));
       }
-      if (!response.ok) {
-        lastError = `http-${response.status}`;
-        continue;
-      }
-      const payload = (await response.json()) as {
-        status?: number;
-        message?: string;
-        data?: Array<{
-          id?: string;
-          title?: string;
-          address?: string;
-          location?: { lat?: number; lng?: number };
-          category?: string;
-        }>;
-      };
-      if (payload.status === 0) {
+      if (!keyFailed) {
         activeKeyIndex = keyIndex;
-        return { keyword, data: payload.data ?? [], error: undefined };
+        return { keyword, data: collected, error: undefined };
       }
-      lastError = payload.message ?? "api-error";
     }
     return { keyword, data: [], error: lastError };
   };

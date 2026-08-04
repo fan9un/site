@@ -45,5 +45,6 @@ test("冲突源缺失不会伪装成已完成核验", () => {
   const result = assessCandidateSuitability(origin, "care", []);
   assert.equal(result.eligible, true);
   assert.equal(result.score, 72);
+  assert.equal(result.verified, false);
   assert.match(result.notes[0], /未取得.*冲突源数据/);
 });
