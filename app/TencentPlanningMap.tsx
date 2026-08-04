@@ -9,7 +9,7 @@ export type PlanningMapPoint = {
   name: string;
   lat: number;
   lng: number;
-  kind: "zone" | "facility" | "imported" | "recommendation";
+  kind: "zone" | "facility" | "imported" | "recommendation" | "constraint";
   score?: number;
   rank?: number;
   serviceRadiusKm?: number;
@@ -106,6 +106,8 @@ export default function TencentPlanningMap({
   const markerLayerRef = useRef<TencentLayer | null>(null);
   const labelLayerRef = useRef<TencentLayer | null>(null);
   const circleLayerRef = useRef<TencentLayer | null>(null);
+  const initialCenterRef = useRef(center);
+  const initialScaleRef = useRef(scale);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     apiKey ? "loading" : "error",
   );
@@ -119,9 +121,10 @@ export default function TencentPlanningMap({
     loadTencentMap(apiKey)
       .then(() => {
         if (cancelled || !containerRef.current || !window.TMap) return;
-        const view = scaleViews[scale];
+        const view = scaleViews[initialScaleRef.current];
+        const initialCenter = initialCenterRef.current;
         const map = new window.TMap.Map(containerRef.current, {
-          center: new window.TMap.LatLng(center.lat, center.lng),
+          center: new window.TMap.LatLng(initialCenter.lat, initialCenter.lng),
           zoom: view.zoom,
           pitch: view.pitch,
           rotation: 0,
@@ -183,7 +186,10 @@ export default function TencentPlanningMap({
       scale === "local"
         ? points
         : points.filter(
-            (point) => point.kind === "zone" || point.kind === "recommendation",
+            (point) =>
+              point.kind === "zone" ||
+              point.kind === "recommendation" ||
+              point.kind === "constraint",
           );
     const markerLayer = new TMap.MultiMarker({
       id: "planning-points",
@@ -219,6 +225,12 @@ export default function TencentPlanningMap({
           anchor: { x: 21, y: 59 },
           src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
         }),
+        constraint: new TMap.MarkerStyle({
+          width: 23,
+          height: 32,
+          anchor: { x: 11, y: 32 },
+          src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
+        }),
       },
       geometries: visiblePoints.map((point) => ({
           id: point.id,
@@ -231,6 +243,8 @@ export default function TencentPlanningMap({
                 ? "active"
                 : point.kind === "zone"
                   ? "zone"
+                  : point.kind === "constraint"
+                    ? "constraint"
                   : "facility",
           position: new TMap.LatLng(point.lat, point.lng),
           properties: { kind: point.kind },
@@ -255,6 +269,9 @@ export default function TencentPlanningMap({
     const recommendations = visiblePoints.filter(
       (point) => point.kind === "recommendation",
     );
+    const constraints = visiblePoints.filter(
+      (point) => point.kind === "constraint",
+    );
     labelLayerRef.current = new TMap.MultiLabel({
       id: "planning-labels",
       map,
@@ -273,6 +290,13 @@ export default function TencentPlanningMap({
           alignment: "center",
           verticalAlignment: "middle",
         }),
+        constraint: new TMap.LabelStyle({
+          color: "#9f352c",
+          size: 11,
+          offset: { x: 0, y: -38 },
+          alignment: "center",
+          verticalAlignment: "middle",
+        }),
       },
       geometries: [
         ...zones.map((point) => ({
@@ -286,6 +310,12 @@ export default function TencentPlanningMap({
           styleId: "recommendation",
           position: new TMap.LatLng(point.lat, point.lng),
           content: `方案 0${point.rank ?? ""} · ${point.name}`,
+        })),
+        ...constraints.map((point) => ({
+          id: `label-${point.id}`,
+          styleId: "constraint",
+          position: new TMap.LatLng(point.lat, point.lng),
+          content: `避让 · ${point.name}`,
         })),
       ],
     });

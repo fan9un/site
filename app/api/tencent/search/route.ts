@@ -19,6 +19,16 @@ const housingKeywords = [
   "图书馆",
   "派出所",
   "火车站",
+  "写字楼",
+  "产业园",
+  "公司企业",
+  "商务中心",
+  "机场",
+  "港口",
+  "化工园",
+  "垃圾处理",
+  "污水处理厂",
+  "铁路货运站",
 ];
 
 const worldCupKeywords = [
@@ -39,10 +49,17 @@ export async function POST(request: NextRequest) {
     mode?: "housing" | "worldcup";
   };
 
-  const key =
-    body.key?.trim() || process.env.TENCENT_MAP_SERVICE_KEY?.trim();
+  const keyCandidates = Array.from(
+    new Set(
+      [
+        body.key?.trim(),
+        process.env.TENCENT_MAP_SERVICE_KEY?.trim(),
+        process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim(),
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
   const region = body.region?.trim();
-  if (!key || !region) {
+  if (!keyCandidates.length || !region) {
     return NextResponse.json(
       { error: "腾讯位置服务 Key 和区域不能为空" },
       { status: 400 },
@@ -52,40 +69,48 @@ export async function POST(request: NextRequest) {
   const keywords =
     body.mode === "worldcup" ? worldCupKeywords : housingKeywords;
 
+  let activeKeyIndex = 0;
   const fetchKeyword = async (keyword: string) => {
-    const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
-    url.searchParams.set("boundary", `region(${region},2)`);
-    url.searchParams.set("keyword", keyword);
-    url.searchParams.set("page_size", "20");
-    url.searchParams.set("key", key);
+    let lastError = "api-error";
+    for (let offset = 0; offset < keyCandidates.length; offset += 1) {
+      const keyIndex = (activeKeyIndex + offset) % keyCandidates.length;
+      const url = new URL("https://apis.map.qq.com/ws/place/v1/search");
+      url.searchParams.set("boundary", `region(${region},2)`);
+      url.searchParams.set("keyword", keyword);
+      url.searchParams.set("page_size", "20");
+      url.searchParams.set("key", keyCandidates[keyIndex]);
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: { Accept: "application/json" },
-      });
-    } catch {
-      return { keyword, data: [], error: "network" };
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: { Accept: "application/json" },
+        });
+      } catch {
+        lastError = "network";
+        continue;
+      }
+      if (!response.ok) {
+        lastError = `http-${response.status}`;
+        continue;
+      }
+      const payload = (await response.json()) as {
+        status?: number;
+        message?: string;
+        data?: Array<{
+          id?: string;
+          title?: string;
+          address?: string;
+          location?: { lat?: number; lng?: number };
+          category?: string;
+        }>;
+      };
+      if (payload.status === 0) {
+        activeKeyIndex = keyIndex;
+        return { keyword, data: payload.data ?? [], error: undefined };
+      }
+      lastError = payload.message ?? "api-error";
     }
-    if (!response.ok) {
-      return { keyword, data: [], error: `http-${response.status}` };
-    }
-    const payload = (await response.json()) as {
-      status?: number;
-      message?: string;
-      data?: Array<{
-        id?: string;
-        title?: string;
-        address?: string;
-        location?: { lat?: number; lng?: number };
-        category?: string;
-      }>;
-    };
-    return {
-      keyword,
-      data: payload.status === 0 ? payload.data ?? [] : [],
-      error: payload.status === 0 ? undefined : payload.message ?? "api-error",
-    };
+    return { keyword, data: [], error: lastError };
   };
 
   const results: Awaited<ReturnType<typeof fetchKeyword>>[] = [];
@@ -105,6 +130,7 @@ export async function POST(request: NextRequest) {
       name: item.title,
       address: item.address,
       category: result.keyword,
+      poiCategory: item.category,
       lat: item.location?.lat,
       lng: item.location?.lng,
     })),

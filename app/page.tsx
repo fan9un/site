@@ -3,7 +3,6 @@
 import {
   FormEvent,
   type CSSProperties,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -41,6 +40,7 @@ import {
   Wind,
   type LucideIcon,
 } from "lucide-react";
+import { assessCandidateSuitability } from "./siting-constraints";
 import TencentPlanningMap, {
   type PlanningMapPoint,
 } from "./TencentPlanningMap";
@@ -108,8 +108,23 @@ type TencentPoi = {
   name?: string;
   address?: string;
   category?: string;
+  poiCategory?: string;
   lat: number;
   lng: number;
+};
+
+type ConstraintKind =
+  | "airport"
+  | "port"
+  | "industrial"
+  | "waste"
+  | "wastewater"
+  | "freight";
+
+type SiteConstraint = Coord & {
+  id: string;
+  name: string;
+  kind: ConstraintKind;
 };
 
 type AnalysisScenario = {
@@ -117,10 +132,13 @@ type AnalysisScenario = {
   center: Coord;
   zones: HousingZone[];
   facilities: Facility[];
+  constraints: SiteConstraint[];
   parcels: LandParcel[];
   regionalContext: MetricMap;
   hasMarketPrices: boolean;
   isImported: boolean;
+  employmentPoiCount: number;
+  estimatedJobs: number | null;
   dataNote: string;
 };
 
@@ -149,6 +167,8 @@ type GeneratedCandidate = {
   openingYear: number;
   cost: number;
   robustness: number;
+  suitabilityScore: number;
+  constraintNotes: string[];
   nearestZoneId: string;
 };
 
@@ -920,6 +940,35 @@ function facilityScore(
   );
 }
 
+function employmentAccessibilityScore(
+  zone: HousingZone,
+  facilities: Facility[],
+  year: number,
+) {
+  const employmentPois = facilities.filter(
+    (facility) => facility.type === "employment" && isFacilityActive(facility, year),
+  );
+  if (!employmentPois.length) return zone.metrics.employment ?? 50;
+  const accessibleJobs = employmentPois.reduce((sum, facility) => {
+    const distance = haversine(zone.coord, facility);
+    return (
+      sum +
+      facility.capacity *
+        facility.quality *
+        decay(distance, "gravity", 7.5)
+    );
+  }, 0);
+  const workingPopulation =
+    projectedPopulation(zone, year) *
+    10000 *
+    Math.max(0.35, zone.demographics.workingAgeRatio);
+  const jobsPerWorker = accessibleJobs / Math.max(1, workingPopulation);
+  return Math.max(
+    0,
+    Math.min(100, 100 / (1 + Math.exp(-(jobsPerWorker - 0.42) / 0.16))),
+  );
+}
+
 function transportNodeScore(
   zone: HousingZone,
   facilities: Facility[],
@@ -1002,6 +1051,8 @@ function deriveZoneMetrics(
     .forEach((factor) => {
       metrics[factor.key] = facilityScore(zone, facilities, factor.key, year);
     });
+
+  metrics.employment = employmentAccessibilityScore(zone, facilities, year);
 
   const busNode = transportNodeScore(zone, facilities, "bus", year);
   const brtNode = transportNodeScore(zone, facilities, "brt", year);
@@ -1139,6 +1190,7 @@ function estimateLifecycleCost(parcel: LandParcel, factor: string) {
 function generateCandidates(
   parcels: LandParcel[],
   zones: HousingZone[],
+  constraints: SiteConstraint[] = [],
 ): GeneratedCandidate[] {
   return parcels.flatMap((parcel) =>
     parcel.zoningAllowed.flatMap((factor) => {
@@ -1149,11 +1201,18 @@ function generateCandidates(
           haversine(a.coord, parcel.center) - haversine(b.coord, parcel.center),
       )[0];
       if (haversine(nearest.coord, parcel.center) > config.serviceRadius) return [];
-      const robustness =
+      const suitability = assessCandidateSuitability(
+        parcel.center,
+        factor,
+        constraints,
+      );
+      if (!suitability.eligible || suitability.score < 65) return [];
+      const baseRobustness =
         100 *
         (0.45 * (1 - parcel.risk) +
           0.3 * parcel.policyCertainty +
           0.25 * (1 - parcel.demolitionDifficulty));
+      const robustness = baseRobustness * 0.72 + suitability.score * 0.28;
       return [{
         id: `${parcel.id}-${factor}`,
         parcelId: parcel.id,
@@ -1166,6 +1225,8 @@ function generateCandidates(
         openingYear: BASE_YEAR + config.constructionYears,
         cost: estimateLifecycleCost(parcel, factor),
         robustness,
+        suitabilityScore: suitability.score,
+        constraintNotes: suitability.notes,
         nearestZoneId: nearest.id,
       }];
     }),
@@ -1526,10 +1587,13 @@ const demoScenario: AnalysisScenario = {
   center: { lat: 24.5127, lng: 118.1392 },
   zones: housingZones,
   facilities: existingFacilities,
+  constraints: [],
   parcels: landParcels,
   regionalContext: regionalContextMetrics,
   hasMarketPrices: true,
   isImported: false,
+  employmentPoiCount: 0,
+  estimatedJobs: null,
   dataNote: "内置演示场景：社区、人口、风险、房价与规划年份均为模型演示数据。",
 };
 
@@ -1557,6 +1621,9 @@ function selectDistributedPois(points: TencentPoi[], count: number) {
 }
 
 function poiFacilityMapping(category = "") {
+  if (/写字楼|产业园|公司企业|商务中心/.test(category)) {
+    return { type: "employment", transportMode: undefined };
+  }
   if (/医院/.test(category)) return { type: "medical", transportMode: undefined };
   if (/学校|幼儿园/.test(category)) return { type: "education", transportMode: undefined };
   if (/BRT/i.test(category)) return { type: "transit", transportMode: "brt" as const };
@@ -1571,6 +1638,25 @@ function poiFacilityMapping(category = "") {
   if (/图书馆/.test(category)) return { type: "culture", transportMode: undefined };
   if (/餐厅/.test(category)) return { type: "dining", transportMode: undefined };
   if (/派出所/.test(category)) return { type: "safety", transportMode: undefined };
+  return undefined;
+}
+
+function estimatedEmploymentCapacity(category = "") {
+  if (/产业园/.test(category)) return 2500;
+  if (/写字楼/.test(category)) return 800;
+  if (/商务中心/.test(category)) return 500;
+  return 80;
+}
+
+function constraintKindFromPoi(point: TencentPoi): ConstraintKind | undefined {
+  const query = point.category ?? "";
+  const evidence = `${point.name ?? ""}|${point.poiCategory ?? ""}`;
+  if (/机场/.test(query) && /机场|航空/.test(evidence)) return "airport";
+  if (/港口/.test(query) && /港口|港区|码头|集装箱|货运/.test(evidence)) return "port";
+  if (/化工园/.test(query) && /化工|石化|危化/.test(evidence)) return "industrial";
+  if (/垃圾处理/.test(query) && /垃圾|废弃物|焚烧/.test(evidence)) return "waste";
+  if (/污水处理/.test(query) && /污水|水质净化/.test(evidence)) return "wastewater";
+  if (/铁路货运站/.test(query) && /货运|编组站|铁路物流/.test(evidence)) return "freight";
   return undefined;
 }
 
@@ -1593,7 +1679,7 @@ function buildProxyParcels(zones: HousingZone[]): LandParcel[] {
       landUse: "vacant" as const,
       zoningAllowed: allowedSets[(zoneIndex + offsetIndex) % allowedSets.length],
       demolitionDifficulty: 0.25,
-      policyCertainty: 0.62,
+      policyCertainty: 0.42,
       risk: 0.22,
     })),
   );
@@ -1638,24 +1724,47 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
     },
     metrics: { ...middleDefaults },
   }));
+  const constraints: SiteConstraint[] = points.flatMap((point, index) => {
+    const kind = constraintKindFromPoi(point);
+    if (!kind) return [];
+    return [{
+      id: `constraint-${point.id ?? index}`,
+      name: point.name ?? constraintLabels[kind],
+      kind,
+      lat: point.lat,
+      lng: point.lng,
+    }];
+  });
   const facilities: Facility[] = points.flatMap((point, index) => {
     if (/住宅小区/.test(point.category ?? "")) return [];
+    if (constraintKindFromPoi(point)) return [];
     const mapping = poiFacilityMapping(point.category);
     if (!mapping) return [];
     const config = facilityTypeConfig[mapping.type];
+    if (!config && mapping.type !== "employment") return [];
     return [{
       id: `import-facility-${point.id ?? index}`,
       type: mapping.type,
       name: point.name ?? point.category ?? "腾讯地图设施",
       lat: point.lat,
       lng: point.lng,
-      capacity: config.defaultCapacity,
-      quality: 0.78,
+      capacity:
+        mapping.type === "employment"
+          ? estimatedEmploymentCapacity(point.category)
+          : config!.defaultCapacity,
+      quality: mapping.type === "employment" ? 0.72 : 0.78,
       openingYear: BASE_YEAR,
       lifecycleSource: "tencent_poi" as const,
       transportMode: mapping.transportMode,
     }];
   });
+  const employmentFacilities = facilities.filter(
+    (facility) => facility.type === "employment",
+  );
+  const estimatedJobs = employmentFacilities.reduce(
+    (sum, facility) => sum + facility.capacity,
+    0,
+  );
   const centerSource = zones.length ? zones.map((zone) => zone.coord) : points;
   const center = {
     lat: centerSource.reduce((sum, point) => sum + point.lat, 0) / centerSource.length,
@@ -1669,11 +1778,14 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
     center,
     zones,
     facilities,
+    constraints,
     parcels: buildProxyParcels(zones),
     regionalContext,
     hasMarketPrices: false,
     isImported: true,
-    dataNote: `已用腾讯地图位置与类别建立 ${zones.length} 个社区样本、${facilities.length} 个设施。容量、品质、人口、风险、区域层和候选用地仍是代理值，必须用统计/规划数据校准。`,
+    employmentPoiCount: employmentFacilities.length,
+    estimatedJobs,
+    dataNote: `已用腾讯地图位置与类别建立 ${zones.length} 个社区样本、${facilities.length} 个服务/岗位 POI，并检索 ${constraints.length} 个机场、港口等冲突源。岗位数和候选用地仍是代理值，必须用统计/规划数据校准。`,
   };
 }
 
@@ -1694,6 +1806,7 @@ export default function Home() {
   const [importKey, setImportKey] = useState("");
   const [importRegion, setImportRegion] = useState("厦门市湖里区");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [importErrorMessage, setImportErrorMessage] = useState("");
   const [analysisScenario, setAnalysisScenario] =
     useState<AnalysisScenario>(demoScenario);
   const [customFacilities, setCustomFacilities] = useState<string[]>([]);
@@ -1710,8 +1823,17 @@ export default function Home() {
   const [toast, setToast] = useState("");
 
   const generatedCandidates = useMemo(
-    () => generateCandidates(analysisScenario.parcels, analysisScenario.zones),
-    [analysisScenario.parcels, analysisScenario.zones],
+    () =>
+      generateCandidates(
+        analysisScenario.parcels,
+        analysisScenario.zones,
+        analysisScenario.constraints,
+      ),
+    [
+      analysisScenario.constraints,
+      analysisScenario.parcels,
+      analysisScenario.zones,
+    ],
   );
   const tencentMapKey =
     process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim() ?? "";
@@ -1772,8 +1894,20 @@ export default function Home() {
         lng: facility.lng,
         kind: "facility" as const,
       })),
+      ...analysisScenario.constraints.map((constraint) => ({
+        id: constraint.id,
+        name: `${constraintLabels[constraint.kind]} · ${constraint.name}`,
+        lat: constraint.lat,
+        lng: constraint.lng,
+        kind: "constraint" as const,
+      })),
     ],
-    [analysisScenario.facilities, forecastYear, housingScores],
+    [
+      analysisScenario.constraints,
+      analysisScenario.facilities,
+      forecastYear,
+      housingScores,
+    ],
   );
 
   const fairness = fairnessIndex(
@@ -1865,16 +1999,12 @@ export default function Home() {
     }));
   }, [analysisScenario.zones, housingOptimization.selected, mapScale]);
 
-  useEffect(() => {
-    const selected = housingOptimization.selected;
-    if (!selected.length) {
-      setActiveRecommendationId("");
-      return;
-    }
-    if (!selected.some((candidate) => candidate.id === activeRecommendationId)) {
-      setActiveRecommendationId(selected[0].id);
-    }
-  }, [activeRecommendationId, housingOptimization.selected]);
+  const resolvedActiveRecommendationId =
+    housingOptimization.selected.some(
+      (candidate) => candidate.id === activeRecommendationId,
+    )
+      ? activeRecommendationId
+      : housingOptimization.selected[0]?.id ?? "";
 
   const housingRecommendations = useMemo<Recommendation[]>(() => {
     const baseEvaluation = evaluatePortfolio(
@@ -1922,7 +2052,7 @@ export default function Home() {
         title: `新建${candidate.facility}`,
         place: `${nearestZone.name}附近 · ${candidate.parcelName}`,
         impact: `净效益 +${marginalObjective.toFixed(2)} 亿元`,
-        detail: `组合方案成员 · 影响 ${affectedZones.length} 个社区；全生命周期成本 ${candidate.cost.toFixed(2)} 亿元，预计 ${candidate.openingYear} 年投用，组合公平指数 +${fairnessGain.toFixed(1)}。`,
+        detail: `组合方案成员 · 影响 ${affectedZones.length} 个社区；成本 ${candidate.cost.toFixed(2)} 亿元，${candidate.openingYear} 年投用。场地适宜性 ${candidate.suitabilityScore.toFixed(0)}/100；${candidate.constraintNotes[0]}。组合公平指数 ${fairnessGain >= 0 ? "+" : ""}${fairnessGain.toFixed(1)}。`,
         score: Math.round(candidate.robustness),
         tone: (["lime", "coral", "blue"] as const)[index],
         sourceId: candidate.id,
@@ -1931,7 +2061,7 @@ export default function Home() {
   }, [analysisScenario, fairnessWeight, forecastYear, housingOptimization]);
 
   const sensitivityReport = useMemo(() => {
-    const samples = 48;
+    const samples = analysisScenario.isImported ? 18 : 48;
     const ranks = new Map<string, number[]>();
     generatedCandidates.forEach((candidate) =>
       ranks.set(candidate.id, []),
@@ -2087,11 +2217,12 @@ export default function Home() {
         : housingMarkers.filter((marker) => marker.ring === currentScale.ring)
       : cupMarkers;
 
-  useEffect(() => {
-    setFactorView(mode === "housing" ? "all" : "core");
-    if (mode === "housing") setMapScale("local");
+  function switchMode(nextMode: Mode) {
+    setMode(nextMode);
+    setFactorView(nextMode === "housing" ? "all" : "core");
+    if (nextMode === "housing") setMapScale("local");
     setToast("");
-  }, [mode]);
+  }
 
   function showToast(message: string) {
     setToast(message);
@@ -2101,6 +2232,7 @@ export default function Home() {
   async function handleTencentImport(event: FormEvent) {
     event.preventDefault();
     setImportStatus("loading");
+    setImportErrorMessage("");
     try {
       const response = await fetch("/api/tencent/search", {
         method: "POST",
@@ -2115,15 +2247,42 @@ export default function Home() {
       const result = (await response.json()) as {
         region?: string;
         count?: number;
+        categories?: Array<{ name?: string; count?: number; error?: string }>;
         points?: Array<{
           id?: string;
           name?: string;
           address?: string;
           category?: string;
+          poiCategory?: string;
           lat?: number;
           lng?: number;
         }>;
       };
+      const categoryRows = result.categories ?? [];
+      const failedRows = categoryRows.filter((row) => Boolean(row.error));
+      const failedShare = categoryRows.length
+        ? failedRows.length / categoryRows.length
+        : 1;
+      if (failedShare > 0.2) {
+        throw new Error(
+          `腾讯地图仅完成 ${categoryRows.length - failedRows.length}/${categoryRows.length} 类检索，已阻止残缺数据进入模型，请稍后重试或更换 Key。`,
+        );
+      }
+      if (mode === "housing") {
+        const categoryFailed = (name: string) => {
+          const row = categoryRows.find((item) => item.name === name);
+          return !row || Boolean(row.error);
+        };
+        const employmentQueries = ["写字楼", "产业园", "公司企业", "商务中心"];
+        const constraintQueries = ["机场", "港口", "化工园", "垃圾处理", "污水处理厂", "铁路货运站"];
+        if (
+          categoryFailed("住宅小区") ||
+          employmentQueries.every(categoryFailed) ||
+          constraintQueries.every(categoryFailed)
+        ) {
+          throw new Error("住宅、岗位或冲突源检索不完整，已停止分析以避免产生误导性选址建议。");
+        }
+      }
       const validPoints: TencentPoi[] = (result.points ?? [])
         .filter(
           (point) =>
@@ -2135,6 +2294,7 @@ export default function Home() {
           name: point.name,
           address: point.address,
           category: point.category,
+          poiCategory: point.poiCategory,
           lat: point.lat!,
           lng: point.lng!,
         }));
@@ -2153,8 +2313,13 @@ export default function Home() {
       showToast(
         `已切换到${nextScenario.region}：${nextScenario.zones.length} 个社区样本、${nextScenario.facilities.length} 个设施进入模型`,
       );
-    } catch {
+    } catch (error) {
       setImportStatus("error");
+      setImportErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "连接失败，请检查 Key、域名白名单或配额后重试。",
+      );
     }
   }
 
@@ -2163,6 +2328,7 @@ export default function Home() {
     setImportRegion(demoScenario.region);
     setActiveHousingId(demoScenario.zones[0].id);
     setForecastYear(2030);
+    setImportErrorMessage("");
     setImportStatus("idle");
     setMapScale("local");
     setMapView("real");
@@ -2235,14 +2401,14 @@ export default function Home() {
         <div className="mode-switch" aria-label="规划模式">
           <button
             className={mode === "housing" ? "active" : ""}
-            onClick={() => setMode("housing")}
+            onClick={() => switchMode("housing")}
           >
             <span>城市住房</span>
             <small>15 分钟生活圈</small>
           </button>
           <button
             className={mode === "worldcup" ? "active" : ""}
-            onClick={() => setMode("worldcup")}
+            onClick={() => switchMode("worldcup")}
           >
             <span>世界杯 2038</span>
             <small>场馆承载力</small>
@@ -2353,6 +2519,13 @@ export default function Home() {
               </div>
               <p>{analysisScenario.dataNote}</p>
               {analysisScenario.isImported && (
+                <div className="provenance-stats">
+                  <span><b>{analysisScenario.employmentPoiCount}</b>岗位 POI</span>
+                  <span><b>{formatNumber(analysisScenario.estimatedJobs ?? 0)}</b>推算岗位</span>
+                  <span><b>{analysisScenario.constraints.length}</b>冲突源</span>
+                </div>
+              )}
+              {analysisScenario.isImported && (
                 <button onClick={restoreDemoScenario}>恢复湖里区演示</button>
               )}
             </div>
@@ -2379,7 +2552,7 @@ export default function Home() {
                       {factor.label}
                       <small>
                         {"ring" in factor
-                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.radius} · 权重 ${activeHousing.weights[factor.key].toFixed(1)}`
+                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.key === "employment" && analysisScenario.isImported ? "岗位 POI 重力模型" : factor.radius} · 权重 ${activeHousing.weights[factor.key].toFixed(1)}`
                           : factor.radius}
                       </small>
                     </span>
@@ -2484,7 +2657,7 @@ export default function Home() {
                 center={analysisScenario.center}
                 points={realMapPoints}
                 activeZoneId={activeHousingId}
-                activeRecommendationId={activeRecommendationId}
+                activeRecommendationId={resolvedActiveRecommendationId}
                 onZoneSelect={setActiveHousingId}
                 onRecommendationSelect={(recommendationId) =>
                   activateRecommendation(recommendationId)
@@ -2670,7 +2843,7 @@ export default function Home() {
               recommendationSchematicPoints.map(({ candidate, rank, x, y, radius }) => (
                 <button
                   key={candidate.id}
-                  className={`proposed-site ${activeRecommendationId === candidate.id ? "active" : ""}`}
+                  className={`proposed-site ${resolvedActiveRecommendationId === candidate.id ? "active" : ""}`}
                   style={
                     {
                       "--site-x": `${x}%`,
@@ -2678,7 +2851,7 @@ export default function Home() {
                       "--service-diameter": `${radius}px`,
                     } as CSSProperties
                   }
-                  aria-pressed={activeRecommendationId === candidate.id}
+                  aria-pressed={resolvedActiveRecommendationId === candidate.id}
                   aria-label={`方案 ${rank}：${candidate.facility}，${candidate.parcelName}`}
                   onClick={() => activateRecommendation(candidate.id)}
                 >
@@ -2695,6 +2868,7 @@ export default function Home() {
                     <span><i className="legend-node real-zone" />社区价值点</span>
                     <span><i className="legend-node real-facility" />设施 / POI</span>
                     <span><i className="legend-proposed" />组合建议与服务圈</span>
+                    <span><i className="legend-constraint" />机场 / 港口等避让源</span>
                     <span><i className="legend-line road" />真实路网</span>
                     <span><i className="legend-water" />海岸线与水域</span>
                   </>
@@ -2892,7 +3066,7 @@ export default function Home() {
             <section className="sensitivity-card">
               <div className="price-audit-head">
                 <span>±20% 敏感性分析</span>
-                <b>48 次情景</b>
+                <b>{analysisScenario.isImported ? "18 次情景" : "48 次情景"}</b>
               </div>
               {sensitivityReport.map((item) => (
                 <div className="sensitivity-row" key={item.candidate.id}>
@@ -2943,7 +3117,7 @@ export default function Home() {
             {recommendations.map((item) => (
               <article
                 className={`recommendation-card ${
-                  item.sourceId === activeRecommendationId ? "map-active" : ""
+                  item.sourceId === resolvedActiveRecommendationId ? "map-active" : ""
                 }`}
                 key={item.rank}
               >
@@ -3052,7 +3226,7 @@ export default function Home() {
                 <span className="modal-kicker">DATA CONNECTOR</span>
                 <h2>从腾讯地图建立真实空间样本</h2>
                 <p className="modal-lead">
-                  输入任意城市、区县或城区后，系统会重新生成社区样本、设施集合、地图中心和选址候选，整套模型不再引用湖里区。腾讯地图只提供 POI 位置与类别，容量、人口、风险、房价和规划生命周期会明确标为待校准代理值。
+                  输入任意城市、区县或城区后，系统会重新生成社区样本、设施集合、岗位可达、冲突源和选址候选。岗位通过写字楼、产业园、企业和商务中心 POI 推算；机场、港口、化工园、垃圾/污水设施和货运站会进入强制避让筛查。腾讯地图不提供真实员工数或法定用地属性，相关结果会明确标为代理值。
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -3076,7 +3250,7 @@ export default function Home() {
                     <span><b>03</b> 容量品质校准</span>
                   </div>
                   {importStatus === "error" && (
-                    <div className="form-error">连接失败，请检查 Key、域名白名单或配额后重试。</div>
+                    <div className="form-error">{importErrorMessage || "连接失败，请检查 Key、域名白名单或配额后重试。"}</div>
                   )}
                   <button className="modal-submit" disabled={importStatus === "loading"}>
                     {importStatus === "loading"
@@ -3139,7 +3313,9 @@ export default function Home() {
                       <article><b>空间供需 A</b><p>设施以坐标、容量、品质和投用年份记录。医疗等使用高斯衰减，公交使用指数衰减，商业等使用重力衰减；Sigmoid 自动体现饱和效应。</p></article>
                       <article><b>非线性交互 I</b><p>医疗×公交、教育×绿地、岗位×轨道形成互补奖励；养老服务与低安全、绿地与污染暴露形成冲突惩罚。</p></article>
                       <article><b>人口自适应权重</b><p>老年、儿童与劳动年龄人口按偏好向量混合，并在各空间层内重新归一化。因此同一设施对不同社区的价值不同。</p></article>
+                      <article><b>岗位可达从哪里来</b><p>演示数据为人工情景值；真实区域导入后，写字楼按 800 岗、产业园按 2500 岗、商务中心按 500 岗、普通企业按 80 岗建立代理容量，再用 7.5km 重力衰减除以劳动年龄人口。腾讯地图不提供真实员工数，因此界面同时披露 POI 数与推算岗位数。</p></article>
                       <article><b>时间与风险 m(R)</b><p>人口按社区增长率预测；只有数据明确给出投用年/退役年的设施才会进入或退出。地质、洪涝、污染、工业和噪声合成为 0.3–1.0 的整体价值乘数。</p></article>
+                      <article><b>场地冲突红线</b><p>候选点先与机场、港口、化工园、垃圾/污水设施和铁路货运站计算距离。养老、学校在机场 8km 内、港口 5.5km 内直接淘汰；医疗、社区文化和公园采用 6km / 5km 红线。该圆形红线是缺少机场噪声等值线、港区边界时的保守代理，正式规划仍须替换为法定图层。</p></article>
                       <article><b>六类交通构成</b><p>综合交通由步行20%、自行车12%、公交/BRT 28%、地铁25%、道路驾车10%、轮渡/城际5%组成。不同方式使用不同服务距离、容量基准与衰减函数。</p></article>
                       <article><b>公平口径</b><p>F = 100 × (1 − 人口加权Gini)。它只比较区内服务 U×风险，不包含同一分析区各社区共享的区域背景。</p></article>
                     </div>
@@ -3159,7 +3335,7 @@ export default function Home() {
                     <div className="siting-steps">
                       <span><b>01</b>自动生成<small>地块 × 允许设施类型</small></span>
                       <i>→</i>
-                      <span><b>02</b>空间过滤<small>用地、风险、服务半径和预算</small></span>
+                      <span><b>02</b>空间过滤<small>用地、机场/港口红线、风险和服务半径</small></span>
                       <i>→</i>
                       <span><b>03</b>组合贪心<small>每次重算所有社区的边际效益</small></span>
                       <i>→</i>
@@ -3168,7 +3344,7 @@ export default function Home() {
                     <div className="objective">
                       max J = (1−λ) · 效率收益PV + λ · 公平福利PV − 全生命周期成本 − 风险CVaR
                     </div>
-                    <p className="algorithm-note">四项目标均转换为亿元现值。当前由 {analysisScenario.parcels.length} 个{analysisScenario.isImported ? "待用地核验的代理网格" : "地块"}自动生成 {generatedCandidates.length} 个合法候选，每个新增设施都通过距离函数同时影响多个社区，不再使用固定 boost 或预算罚分魔法常数。</p>
+                    <p className="algorithm-note">四项目标均转换为亿元现值。当前由 {analysisScenario.parcels.length} 个{analysisScenario.isImported ? "待用地核验的代理网格" : "地块"}经过 {analysisScenario.constraints.length} 个冲突源筛查后生成 {generatedCandidates.length} 个候选。硬红线内候选直接剔除；但代理网格仍不等于法定可建设地块，最终必须叠加控规图斑复核。</p>
 
                     <h3 className="algorithm-title">自适应求解器：问题不同，算法不同</h3>
                     <div className="solver-matrix">
@@ -3198,7 +3374,7 @@ export default function Home() {
                       <span>空间候选生成</span><i>→</i>
                       <span>贪心热启动</span><i>→</i>
                       <span>地块 swap</span><i>→</i>
-                      <span>48 次参数扰动</span><i>→</i>
+                      <span>{analysisScenario.isImported ? "18" : "48"} 次参数扰动</span><i>→</i>
                       <span>稳定性报告</span>
                     </div>
 
