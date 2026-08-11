@@ -12,7 +12,7 @@ export type ConstraintPoint = {
   kind: ConstraintKind;
 };
 
-const constraintLabels: Record<ConstraintKind, string> = {
+export const constraintLabels: Record<ConstraintKind, string> = {
   airport: "机场",
   port: "港口",
   industrial: "化工园",

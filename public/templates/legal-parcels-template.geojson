@@ -1,0 +1,34 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "parcel_id": "LEGAL-DEMO-001",
+        "name": "示例法定公益设施地块",
+        "legal_status": "draft",
+        "approval_ref": "",
+        "area_ha": 1.2,
+        "land_price_10k_per_mu": 280,
+        "zoning_allowed": ["medical", "education", "care"],
+        "land_use": "vacant",
+        "demolition_difficulty": 0.2,
+        "policy_certainty": 0.95,
+        "risk": 0.12,
+        "coordinate_system": "wgs84"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [118.1280, 24.5080],
+            [118.1320, 24.5080],
+            [118.1320, 24.5120],
+            [118.1280, 24.5120],
+            [118.1280, 24.5080]
+          ]
+        ]
+      }
+    }
+  ]
+}

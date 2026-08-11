@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChangeEvent,
   FormEvent,
   type CSSProperties,
   useMemo,
@@ -40,13 +41,23 @@ import {
   Wind,
   type LucideIcon,
 } from "lucide-react";
-import { assessCandidateSuitability } from "./siting-constraints";
+import { assessCandidateSuitability, constraintLabels } from "./siting-constraints";
 import {
   competitiveAccessibility,
   explainPriceResidual,
   standardizedIndex,
   weightedRiskMultiplier,
 } from "./model-validation";
+import {
+  employmentOpportunityIndex,
+  fitHedonicModel,
+  matrixKey,
+  parseEnterpriseCsv,
+  parseLegalParcelGeoJson,
+  parseTransactionCsv,
+  type HedonicAudit,
+  type TravelTimeMatrix,
+} from "./data-pipeline";
 import TencentPlanningMap, {
   type PlanningMapPoint,
 } from "./TencentPlanningMap";
@@ -107,6 +118,8 @@ type Facility = Coord & {
   closingYear?: number;
   lifecycleSource?: "demo" | "tencent_poi" | "planning" | "manual" | "optimizer";
   transportMode?: TransportMode;
+  industryCategory?: string;
+  employmentSource?: "poi_proxy" | "enterprise_csv" | "qcc_calibrated";
 };
 
 type TencentPoi = {
@@ -145,6 +158,17 @@ type AnalysisScenario = {
   isImported: boolean;
   employmentPoiCount: number;
   estimatedJobs: number | null;
+  employmentDataStatus: "demo" | "poi_proxy" | "enterprise" | "qcc" | "template";
+  employmentCalibration?: {
+    matched: number;
+    disclosedEmployees: number;
+    insuredProxy: number;
+    ambiguous: number;
+    unavailable: number;
+  };
+  routeMatrix?: TravelTimeMatrix;
+  hedonicAudit?: HedonicAudit;
+  parcelDataStatus: "demo" | "proxy" | "legal";
   dataNote: string;
 };
 
@@ -264,6 +288,7 @@ const housingFactors = [
 
   { key: "commerce", label: "大型商业", short: "商", weight: 7, radius: "≤ 5km", ring: "middle" },
   { key: "employment", label: "岗位可达", short: "业", weight: 7, radius: "30 分钟", ring: "middle" },
+  { key: "employmentDiversity", label: "就业多样性", short: "多", weight: 4, radius: "30 分钟", ring: "middle" },
   { key: "tertiaryMedical", label: "三甲医院", short: "院", weight: 5, radius: "≤ 8km", ring: "middle" },
   { key: "higherEducation", label: "高校资源", short: "校", weight: 3, radius: "≤ 8km", ring: "middle" },
   { key: "regionalTransit", label: "轨道枢纽", short: "轨", weight: 5, radius: "≤ 5km", ring: "middle" },
@@ -356,6 +381,7 @@ const factorIcons: Record<string, LucideIcon> = {
   safety: ShieldCheck,
   commerce: ShoppingBag,
   employment: BriefcaseBusiness,
+  employmentDiversity: Building2,
   tertiaryMedical: Hospital,
   higherEducation: GraduationCap,
   regionalTransit: TrainFront,
@@ -982,33 +1008,27 @@ function facilityScore(
   );
 }
 
-function employmentAccessibilityScore(
+function employmentOpportunityScores(
   zone: HousingZone,
   facilities: Facility[],
   year: number,
+  routeMatrix?: TravelTimeMatrix,
 ) {
   const employmentPois = facilities.filter(
     (facility) => facility.type === "employment" && isFacilityActive(facility, year),
   );
-  if (!employmentPois.length) return zone.metrics.employment ?? 50;
-  const accessibleJobs = employmentPois.reduce((sum, facility) => {
-    const distance = haversine(zone.coord, facility);
-    return (
-      sum +
-      facility.capacity *
-        facility.quality *
-        decay(distance, "gravity", 7.5)
-    );
-  }, 0);
   const workingPopulation =
     projectedPopulation(zone, year) *
     10000 *
     Math.max(0.35, zone.demographics.workingAgeRatio);
-  const jobsPerWorker = accessibleJobs / Math.max(1, workingPopulation);
-  return Math.max(
-    0,
-    Math.min(100, 100 / (1 + Math.exp(-(jobsPerWorker - 0.42) / 0.16))),
-  );
+  return employmentOpportunityIndex({
+    zone: { id: zone.id, ...zone.coord },
+    facilities: employmentPois,
+    workingPopulation,
+    routeMatrix,
+    fallbackAccessibility: zone.metrics.employment ?? 50,
+    fallbackDiversity: zone.metrics.employmentDiversity ?? 45,
+  });
 }
 
 function transportNodeScore(
@@ -1080,6 +1100,7 @@ function deriveZoneMetrics(
   facilities: Facility[],
   year: number,
   regionalContext: MetricMap = regionalContextMetrics,
+  routeMatrix?: TravelTimeMatrix,
 ) {
   const metrics = { ...zone.metrics };
   housingFactors
@@ -1088,7 +1109,14 @@ function deriveZoneMetrics(
       metrics[factor.key] = facilityScore(zone, zones, facilities, factor.key, year);
     });
 
-  metrics.employment = employmentAccessibilityScore(zone, facilities, year);
+  const employment = employmentOpportunityScores(
+    zone,
+    facilities,
+    year,
+    routeMatrix,
+  );
+  metrics.employment = employment.accessibility;
+  metrics.employmentDiversity = employment.diversity;
 
   const busNode = transportNodeScore(zone, zones, facilities, "bus", year);
   const brtNode = transportNodeScore(zone, zones, facilities, "brt", year);
@@ -1157,6 +1185,7 @@ function housingValue(
   perturbation: Record<string, number> = {},
   regionalContext: MetricMap = regionalContextMetrics,
   zones: HousingZone[] = housingZones,
+  routeMatrix?: TravelTimeMatrix,
 ) {
   const { metrics, transportBreakdown } = deriveZoneMetrics(
     zone,
@@ -1164,6 +1193,7 @@ function housingValue(
     facilities,
     year,
     regionalContext,
+    routeMatrix,
   );
   const weights = adaptiveWeights(zone.demographics, perturbation);
   const ringScores = Object.fromEntries(
@@ -1180,7 +1210,8 @@ function housingValue(
   const complementarity =
     3.2 * (metrics.medical / 100) * (metrics.transit / 100) +
     2.4 * (metrics.education / 100) * (metrics.green / 100) +
-    1.8 * (metrics.employment / 100) * (metrics.regionalTransit / 100);
+    1.5 * (metrics.employment / 100) * (metrics.regionalTransit / 100) +
+    1.1 * (metrics.employment / 100) * (metrics.employmentDiversity / 100);
   const conflict =
     2.2 * (metrics.care / 100) * (1 - metrics.safety / 100) +
     1.6 * (metrics.green / 100) * zone.risks.pollution;
@@ -1303,16 +1334,17 @@ function evaluatePortfolio(
   zones: HousingZone[] = housingZones,
   baseFacilities: Facility[] = existingFacilities,
   regionalContext: MetricMap = regionalContextMetrics,
+  routeMatrix?: TravelTimeMatrix,
 ): PortfolioEvaluation {
   const nextFacilities = [
     ...baseFacilities,
     ...selected.map(candidateToFacility),
   ];
   const baseModels = zones.map((zone) =>
-    housingValue(zone, baseFacilities, year, perturbation, regionalContext, zones),
+    housingValue(zone, baseFacilities, year, perturbation, regionalContext, zones, routeMatrix),
   );
   const nextModels = zones.map((zone) =>
-    housingValue(zone, nextFacilities, year, perturbation, regionalContext, zones),
+    housingValue(zone, nextFacilities, year, perturbation, regionalContext, zones, routeMatrix),
   );
   const populationWeights = zones.map((zone) =>
     projectedPopulation(zone, year),
@@ -1401,6 +1433,7 @@ function optimizePortfolio(
   zones: HousingZone[] = housingZones,
   baseFacilities: Facility[] = existingFacilities,
   regionalContext: MetricMap = regionalContextMetrics,
+  routeMatrix?: TravelTimeMatrix,
 ) {
   let selected: GeneratedCandidate[] = [];
   let current = evaluatePortfolio(
@@ -1411,6 +1444,7 @@ function optimizePortfolio(
     zones,
     baseFacilities,
     regionalContext,
+    routeMatrix,
   );
   while (selected.length < 4) {
     const available = candidates
@@ -1429,6 +1463,7 @@ function optimizePortfolio(
           zones,
           baseFacilities,
           regionalContext,
+          routeMatrix,
         );
         return {
           candidate,
@@ -1462,6 +1497,7 @@ function optimizePortfolio(
           zones,
           baseFacilities,
           regionalContext,
+          routeMatrix,
         );
         if (
           evaluation.objective > current.objective + 0.001 &&
@@ -1659,6 +1695,8 @@ const demoScenario: AnalysisScenario = {
   isImported: false,
   employmentPoiCount: 0,
   estimatedJobs: null,
+  employmentDataStatus: "demo",
+  parcelDataStatus: "demo",
   dataNote: "内置演示场景：社区、人口、风险、房价与规划年份均为模型演示数据。",
 };
 
@@ -1821,6 +1859,9 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
       openingYear: BASE_YEAR,
       lifecycleSource: "tencent_poi" as const,
       transportMode: mapping.transportMode,
+      industryCategory: undefined,
+      employmentSource:
+        mapping.type === "employment" ? "poi_proxy" as const : undefined,
     }];
   });
   const employmentFacilities = facilities.filter(
@@ -1850,7 +1891,91 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
     isImported: true,
     employmentPoiCount: employmentFacilities.length,
     estimatedJobs,
+    employmentDataStatus: "poi_proxy",
+    parcelDataStatus: "proxy",
     dataNote: `已用腾讯地图位置与类别建立 ${zones.length} 个社区样本、${facilities.length} 个服务/岗位 POI，并检索 ${constraints.length} 个机场、港口等冲突源。岗位数和候选用地仍是代理值，必须用统计/规划数据校准。`,
+  };
+}
+
+async function requestRouteMatrix(
+  zones: HousingZone[],
+  facilities: Facility[],
+): Promise<TravelTimeMatrix> {
+  if (!zones.length || !facilities.length) {
+    throw new Error("需要至少一个社区和一个设施才能建立路网矩阵。");
+  }
+  const durationsMinutes: Record<string, number> = {};
+  const distancesKm: Record<string, number> = {};
+  let matrixSource: TravelTimeMatrix["source"] = "osrm_public_demo";
+  let generatedAt = new Date().toISOString();
+  const employmentFacilities = facilities.filter((facility) => facility.type === "employment");
+  const routePool = employmentFacilities.length ? employmentFacilities : facilities;
+  const routeFacilityIndex = new Map<string, Facility>();
+  zones.forEach((zone) => {
+    [...routePool]
+      .sort((left, right) => haversine(zone.coord, left) - haversine(zone.coord, right))
+      .slice(0, 10)
+      .forEach((facility) => routeFacilityIndex.set(facility.id, facility));
+  });
+  const routeFacilities = [...routeFacilityIndex.values()].slice(0, 60);
+  const chunkSize = 60;
+  for (let offset = 0; offset < routeFacilities.length; offset += chunkSize) {
+    const destinations = routeFacilities.slice(offset, offset + chunkSize);
+    const response = await fetch("/api/routing/matrix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sources: zones.map((zone) => ({
+          id: zone.id,
+          ...zone.coord,
+          coordinateSystem: "gcj02",
+        })),
+        destinations: destinations.map((facility) => ({
+          id: facility.id,
+          lat: facility.lat,
+          lng: facility.lng,
+          coordinateSystem: "gcj02",
+        })),
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      source?: TravelTimeMatrix["source"];
+      generatedAt?: string;
+      sources?: string[];
+      destinations?: string[];
+      durationsMinutes?: Array<Array<number | null>>;
+      distancesKm?: Array<Array<number | null>>;
+    };
+    if (!response.ok || !payload.sources || !payload.destinations || !payload.durationsMinutes) {
+      throw new Error(payload.error || "OSRM 没有返回有效矩阵。");
+    }
+    matrixSource = payload.source ?? matrixSource;
+    generatedAt = payload.generatedAt ?? generatedAt;
+    payload.sources.forEach((sourceId, sourceIndex) => {
+      payload.destinations!.forEach((destinationId, destinationIndex) => {
+        const duration = payload.durationsMinutes?.[sourceIndex]?.[destinationIndex];
+        const distance = payload.distancesKm?.[sourceIndex]?.[destinationIndex];
+        if (typeof duration === "number") {
+          durationsMinutes[matrixKey(sourceId, destinationId)] = duration;
+        }
+        if (typeof distance === "number") {
+          distancesKm[matrixKey(sourceId, destinationId)] = distance;
+        }
+      });
+    });
+  }
+  return {
+    source: matrixSource,
+    profile: "driving",
+    durationsMinutes,
+    distancesKm,
+    generatedAt,
+    destinationCount: routeFacilities.length,
+    note:
+      matrixSource === "osrm_public_demo"
+        ? `腾讯/高德坐标先转换为 WGS-84，再调用 OSRM 公共演示服务生成行车时间矩阵；覆盖每个社区最近的岗位点（去重后 ${routeFacilities.length}/${routePool.length}），其余点保留直线距离回退。正式应用应切换自建实例或持牌服务。`
+        : `坐标转换后调用自定义 OSRM 实例；覆盖 ${routeFacilities.length}/${routePool.length} 个近邻岗位点，其余点保留直线距离回退。`,
   };
 }
 
@@ -1927,9 +2052,11 @@ export default function Home() {
   const [factorView, setFactorView] = useState<"core" | "all">("all");
   const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("none");
   const [importKey, setImportKey] = useState("");
+  const [qccAuthorization, setQccAuthorization] = useState("");
   const [importRegion, setImportRegion] = useState("厦门市湖里区");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [importErrorMessage, setImportErrorMessage] = useState("");
+  const [pipelineStatus, setPipelineStatus] = useState("");
   const [analysisScenario, setAnalysisScenario] =
     useState<AnalysisScenario>(demoScenario);
   const [worldCupFacilities, setWorldCupFacilities] =
@@ -1979,6 +2106,7 @@ export default function Home() {
         {},
         analysisScenario.regionalContext,
         analysisScenario.zones,
+        analysisScenario.routeMatrix,
       ),
     }));
     const logPrices = modelRows.map(({ zone }) => Math.log(Math.max(0.01, zone.price)));
@@ -1991,9 +2119,13 @@ export default function Home() {
       const priceIndex = analysisScenario.hasMarketPrices
         ? standardizedIndex(logPrices[index], logPrices)
         : model.score;
-      const residual = analysisScenario.hasMarketPrices
-        ? priceIndex - valueIndex
-        : 0;
+      const hedonicResidual = analysisScenario.hedonicAudit?.zoneResiduals[zone.id];
+      const rawResidual = hedonicResidual !== undefined
+        ? hedonicResidual * 100
+        : analysisScenario.hasMarketPrices
+          ? priceIndex - valueIndex
+          : 0;
+      const residual = Math.abs(rawResidual) < 0.05 ? 0 : rawResidual;
       return {
         ...zone,
         service: model.score,
@@ -2009,9 +2141,15 @@ export default function Home() {
         valueIndex,
         priceIndex,
         residual,
-        priceReason: analysisScenario.hasMarketPrices
-          ? explainPriceResidual(residual)
-          : zone.priceReason,
+        priceReason: hedonicResidual !== undefined
+          ? analysisScenario.hedonicAudit?.isTemplate
+            ? "当前结果来自字段示例模板，只用于验证享乐模型流程，不可解释为真实房价高估或低估。"
+            : residual === 0
+              ? "享乐模型控制面积、房龄、容积率、绿化率、距 CBD 和成交月份后，当前小区平均残差接近 0；这不代表模型已被充分验证。"
+              : `享乐模型控制面积、房龄、容积率、绿化率、距 CBD 和成交月份后，本小区成交价仍${residual >= 0 ? "高" : "低"}于预测值约 ${Math.abs(residual).toFixed(1)}%。该结果是统计关联，不直接等同于投机溢价或市场低估。`
+          : analysisScenario.hasMarketPrices
+            ? explainPriceResidual(residual)
+            : zone.priceReason,
       };
     });
   }, [analysisScenario, forecastYear]);
@@ -2104,6 +2242,7 @@ export default function Home() {
         analysisScenario.zones,
         analysisScenario.facilities,
         analysisScenario.regionalContext,
+        analysisScenario.routeMatrix,
       ),
     [analysisScenario, budget, fairnessWeight, forecastYear, generatedCandidates],
   );
@@ -2171,6 +2310,7 @@ export default function Home() {
       analysisScenario.zones,
       analysisScenario.facilities,
       analysisScenario.regionalContext,
+      analysisScenario.routeMatrix,
     );
     return housingOptimization.selected.slice(0, 3).map((candidate, index) => {
       const withoutCandidate = housingOptimization.selected.filter(
@@ -2184,6 +2324,7 @@ export default function Home() {
         analysisScenario.zones,
         analysisScenario.facilities,
         analysisScenario.regionalContext,
+        analysisScenario.routeMatrix,
       );
       const affectedZones = analysisScenario.zones.filter(
         (_, zoneIndex) =>
@@ -2246,6 +2387,7 @@ export default function Home() {
         analysisScenario.zones,
         analysisScenario.facilities,
         analysisScenario.regionalContext,
+        analysisScenario.routeMatrix,
       );
       generatedCandidates.forEach((candidate) => {
         const rank = result.selected.findIndex(
@@ -2389,6 +2531,235 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2800);
   }
 
+  async function refreshRouteMatrix(scenario = analysisScenario) {
+    setPipelineStatus("正在向 OSRM 请求分批路网矩阵…");
+    try {
+      const routeMatrix = await requestRouteMatrix(
+        scenario.zones,
+        scenario.facilities,
+      );
+      setAnalysisScenario((current) => ({
+        ...current,
+        routeMatrix,
+        dataNote: `${current.dataNote} 已建立 ${current.zones.length}×${routeMatrix.destinationCount} OSRM 行车矩阵。`,
+      }));
+      setPipelineStatus(
+        `OSRM 矩阵已就绪：${scenario.zones.length} 个社区 × ${routeMatrix.destinationCount} 个设施。`,
+      );
+      showToast("OSRM 路网时间矩阵已更新");
+      return routeMatrix;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "OSRM 矩阵获取失败。";
+      setPipelineStatus(`路网矩阵未更新：${message} 当前继续使用直线距离回退。`);
+      throw error;
+    }
+  }
+
+  async function handleEnterpriseCsv(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const isTemplate = /template|示例/i.test(file.name);
+    setImportErrorMessage("");
+    setPipelineStatus("正在校验企业坐标、行业和员工数…");
+    try {
+      const enterprises = parseEnterpriseCsv(await file.text());
+      const facilities: Facility[] = enterprises.map((enterprise) => ({
+        ...enterprise,
+        type: "employment",
+        openingYear: BASE_YEAR,
+        lifecycleSource: "planning",
+        employmentSource: "enterprise_csv",
+      }));
+      const proxyCount = enterprises.filter((enterprise) => enterprise.usedProxyEmployment).length;
+      const nextScenario: AnalysisScenario = {
+        ...analysisScenario,
+        facilities: [
+          ...analysisScenario.facilities.filter((facility) => facility.type !== "employment"),
+          ...facilities,
+        ],
+        employmentPoiCount: facilities.length,
+        estimatedJobs: facilities.reduce((sum, facility) => sum + facility.capacity, 0),
+        employmentDataStatus: isTemplate ? "template" : "enterprise",
+        routeMatrix: undefined,
+        dataNote: `${analysisScenario.dataNote} 已导入 ${facilities.length} 家${isTemplate ? "示例" : ""}企业的行业与岗位数据${proxyCount ? `；其中 ${proxyCount} 家缺员工数，暂按 80 岗代理` : ""}${isTemplate ? "；仅用于测试字段与算法流程" : ""}。`,
+      };
+      setAnalysisScenario(nextScenario);
+      setPipelineStatus(`企业就业数据已导入，正在刷新路网矩阵…`);
+      try {
+        const routeMatrix = await requestRouteMatrix(nextScenario.zones, nextScenario.facilities);
+        setAnalysisScenario((current) => ({ ...current, routeMatrix }));
+        setPipelineStatus(`企业 CSV 已接入：${facilities.length} 家企业，${nextScenario.zones.length}×${routeMatrix.destinationCount} 路网矩阵。`);
+      } catch (routeError) {
+        setPipelineStatus(`企业 CSV 已接入；OSRM 暂不可用，岗位可达继续使用直线距离回退。`);
+        console.warn(routeError);
+      }
+      showToast(`已导入 ${facilities.length} 家${isTemplate ? "示例" : ""}企业并重算就业多样性`);
+    } catch (error) {
+      setImportErrorMessage(error instanceof Error ? error.message : "企业 CSV 导入失败。");
+      setPipelineStatus("");
+    }
+  }
+
+  async function handleQccEmploymentCalibration() {
+    const employmentFacilities = analysisScenario.facilities.filter(
+      (facility) => facility.type === "employment",
+    );
+    if (!employmentFacilities.length) {
+      setImportErrorMessage("请先导入腾讯岗位 POI 或企业 CSV，再用企查查校准主体。");
+      return;
+    }
+    setImportErrorMessage("");
+    setPipelineStatus("正在逐一锚定企业主体，并读取行业与最新年报人数…");
+    try {
+      const response = await fetch("/api/qcc/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companies: employmentFacilities.slice(0, 6).map((facility) => ({
+            id: facility.id,
+            name: facility.name,
+          })),
+          ...(qccAuthorization.trim()
+            ? { authorization: qccAuthorization.trim() }
+            : {}),
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        matched?: number;
+        results?: Array<{
+          inputId: string;
+          status: "matched" | "ambiguous" | "not_found" | "error";
+          industryCategory?: string;
+          employeeCount?: number;
+          employeeSource?: "annual_report_employees" | "annual_social_insurance" | "unavailable";
+        }>;
+      };
+      if (!response.ok || !payload.results) {
+        throw new Error(payload.error || "企查查校准未返回结果。");
+      }
+      const byId = new Map(payload.results.map((item) => [item.inputId, item]));
+      const disclosedEmployees = payload.results.filter(
+        (item) => item.status === "matched" && item.employeeSource === "annual_report_employees",
+      ).length;
+      const insuredProxy = payload.results.filter(
+        (item) => item.status === "matched" && item.employeeSource === "annual_social_insurance",
+      ).length;
+      const ambiguous = payload.results.filter((item) => item.status === "ambiguous").length;
+      const unavailable = payload.results.length - (payload.matched ?? 0) - ambiguous;
+      const updatedFacilities = analysisScenario.facilities.map((facility) => {
+        const enrichment = byId.get(facility.id);
+        if (!enrichment || enrichment.status !== "matched") return facility;
+        return {
+          ...facility,
+          capacity: enrichment.employeeCount ?? facility.capacity,
+          quality: enrichment.industryCategory ? 0.88 : facility.quality,
+          industryCategory: enrichment.industryCategory ?? facility.industryCategory,
+          employmentSource: "qcc_calibrated" as const,
+        };
+      });
+      const updatedEmployment = updatedFacilities.filter((facility) => facility.type === "employment");
+      setAnalysisScenario((scenario) => ({
+        ...scenario,
+        facilities: updatedFacilities,
+        employmentPoiCount: updatedEmployment.length,
+        estimatedJobs: updatedEmployment.reduce((sum, facility) => sum + facility.capacity, 0),
+        employmentDataStatus: (payload.matched ?? 0) > 0 ? "qcc" : scenario.employmentDataStatus,
+        employmentCalibration: {
+          matched: payload.matched ?? 0,
+          disclosedEmployees,
+          insuredProxy,
+          ambiguous,
+          unavailable,
+        },
+        dataNote: `${scenario.dataNote} 企查查校准 ${payload.matched ?? 0}/${payload.results?.length ?? 0} 个唯一主体：${disclosedEmployees} 个采用年报从业人数、${insuredProxy} 个采用参保人数下界代理；${ambiguous} 个歧义主体未自动选择。`,
+      }));
+      setPipelineStatus(
+        `企查查企业校准完成：唯一匹配 ${payload.matched ?? 0}，年报从业人数 ${disclosedEmployees}，参保人数代理 ${insuredProxy}，歧义未选 ${ambiguous}。`,
+      );
+      showToast(`企查查已校准 ${payload.matched ?? 0} 个就业点`);
+    } catch (error) {
+      setImportErrorMessage(error instanceof Error ? error.message : "企查查校准失败。");
+      setPipelineStatus("");
+    }
+  }
+
+  async function handleTransactionCsv(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const isTemplate = /template|示例/i.test(file.name);
+    setImportErrorMessage("");
+    setPipelineStatus("正在匹配成交记录并拟合享乐价格模型…");
+    try {
+      const rows = parseTransactionCsv(await file.text());
+      const normalized = (value = "") => value.replace(/[\s·•（）()\-]/g, "").toLowerCase();
+      const matched = rows.flatMap((row) => {
+        const zone = housingScores.find(
+          (item) =>
+            (row.zoneId && item.id === row.zoneId) ||
+            (row.zoneName &&
+              (normalized(item.name) === normalized(row.zoneName) ||
+                normalized(item.name).includes(normalized(row.zoneName)) ||
+                normalized(row.zoneName).includes(normalized(item.name)))),
+        );
+        if (!zone) return [];
+        return [{ ...row, zoneId: zone.id, serviceValue: zone.score }];
+      });
+      const audit = { ...fitHedonicModel(matched), isTemplate };
+      const pricesByZone = new Map<string, number[]>();
+      matched.forEach((row) => {
+        const prices = pricesByZone.get(row.zoneId) ?? [];
+        prices.push(row.unitPrice);
+        pricesByZone.set(row.zoneId, prices);
+      });
+      setAnalysisScenario((scenario) => ({
+        ...scenario,
+        zones: scenario.zones.map((zone) => {
+          const prices = [...(pricesByZone.get(zone.id) ?? [])].sort((a, b) => a - b);
+          if (!prices.length) return zone;
+          const median = prices[Math.floor(prices.length / 2)];
+          return {
+            ...zone,
+            price: median > 100 ? median / 10000 : median,
+            priceReason: "已由成交 CSV 的享乐价格模型校准。",
+          };
+        }),
+        hasMarketPrices: true,
+        hedonicAudit: audit,
+        dataNote: `${scenario.dataNote} 享乐模型已匹配 ${audit.sampleSize} 条${isTemplate ? "示例" : "真实"}成交、${audit.zoneCount} 个小区，调整 R²=${audit.adjustedR2.toFixed(2)}${isTemplate ? "；仅验证流程，不作为实证结果" : ""}。`,
+      }));
+      setPipelineStatus(`享乐价格模型已完成：${audit.sampleSize} 条${isTemplate ? "示例" : "真实"}成交，${audit.zoneCount} 个小区，调整 R² ${audit.adjustedR2.toFixed(2)}${isTemplate ? "；本结果仅测试流程" : ""}。`);
+      showToast(`${isTemplate ? "示例" : "真实"}成交已完成享乐价格校准`);
+    } catch (error) {
+      setImportErrorMessage(error instanceof Error ? error.message : "成交 CSV 导入失败。");
+      setPipelineStatus("");
+    }
+  }
+
+  async function handleLegalParcelGeoJson(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImportErrorMessage("");
+    setPipelineStatus("正在核验法定状态、批准文号和允许设施类型…");
+    try {
+      const parcels = parseLegalParcelGeoJson(await file.text());
+      setAnalysisScenario((scenario) => ({
+        ...scenario,
+        parcels,
+        parcelDataStatus: "legal",
+        dataNote: `${scenario.dataNote} 已载入 ${parcels.length} 个带批准文号的法定控规地块，代理候选网格已停用。`,
+      }));
+      setPipelineStatus(`法定控规已接入：${parcels.length} 个地块进入用途、成本和空间冲突筛查。`);
+      showToast(`已用 ${parcels.length} 个法定控规地块替换代理候选`);
+    } catch (error) {
+      setImportErrorMessage(error instanceof Error ? error.message : "控规 GeoJSON 导入失败。");
+      setPipelineStatus("");
+    }
+  }
+
   async function handleTencentImport(event: FormEvent) {
     event.preventDefault();
     setImportStatus("loading");
@@ -2493,9 +2864,24 @@ export default function Home() {
         setManualLng(String(nextScenario.center.lng));
         setMapView("real");
         setMapScale("local");
-        showToast(
-          `已切换到${nextScenario.region}：${nextScenario.zones.length} 个社区样本、${nextScenario.facilities.length} 个设施进入模型`,
-        );
+        setImportStatus("done");
+        setPanel("none");
+        setPipelineStatus("腾讯 POI 已接入，正在请求 OSRM 路网矩阵…");
+        try {
+          const routeMatrix = await requestRouteMatrix(
+            nextScenario.zones,
+            nextScenario.facilities,
+          );
+          setAnalysisScenario((current) => ({
+            ...current,
+            routeMatrix,
+            dataNote: `${current.dataNote} 已建立 ${current.zones.length}×${routeMatrix.destinationCount} OSRM 行车矩阵。`,
+          }));
+          setPipelineStatus(`腾讯 POI + OSRM 已就绪：${nextScenario.zones.length}×${routeMatrix.destinationCount} 路网矩阵。`);
+        } catch {
+          setPipelineStatus("腾讯 POI 已接入；OSRM 公共服务暂不可用，距离暂按球面直线回退。");
+        }
+        showToast(`已切换到${nextScenario.region}并重算空间模型`);
       }
       setImportStatus("done");
       setPanel("none");
@@ -2848,20 +3234,28 @@ export default function Home() {
           )}
 
           {mode === "housing" && (
-            <div className={`data-provenance ${analysisScenario.isImported ? "proxy" : "demo"}`}>
+            <div className={`data-provenance ${analysisScenario.isImported || analysisScenario.parcelDataStatus === "proxy" ? "proxy" : "demo"}`}>
               <div>
                 <b>{analysisScenario.region}</b>
-                <span>{analysisScenario.isImported ? "腾讯 POI 场景" : "内置演示场景"}</span>
+                <span>
+                  {analysisScenario.isImported
+                    ? "外部数据场景"
+                    : analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal"
+                      ? analysisScenario.hedonicAudit?.isTemplate || analysisScenario.employmentDataStatus === "template"
+                        ? "模板试算场景"
+                        : "已校准场景"
+                      : "内置演示场景"}
+                </span>
               </div>
               <p>{analysisScenario.dataNote}</p>
-              {analysisScenario.isImported && (
-                <div className="provenance-stats">
-                  <span><b>{analysisScenario.employmentPoiCount}</b>岗位 POI</span>
-                  <span><b>{formatNumber(analysisScenario.estimatedJobs ?? 0)}</b>推算岗位</span>
-                  <span><b>{analysisScenario.constraints.length}</b>冲突源</span>
-                </div>
-              )}
-              {analysisScenario.isImported && (
+              <div className="provenance-stats">
+                <span><b>{analysisScenario.employmentPoiCount}</b>{analysisScenario.employmentDataStatus === "template" ? "示例就业点" : "就业点"}</span>
+                <span><b>{analysisScenario.employmentDataStatus === "qcc" ? "企查查" : analysisScenario.employmentDataStatus === "enterprise" ? "企业表" : analysisScenario.employmentDataStatus === "poi_proxy" ? "POI代理" : "演示"}</b>岗位口径</span>
+                <span><b>{analysisScenario.routeMatrix ? "路网+直线" : "直线"}</b>距离口径</span>
+                <span><b>{analysisScenario.hedonicAudit ? analysisScenario.hedonicAudit.sampleSize : 0}</b>{analysisScenario.hedonicAudit?.isTemplate ? "示例成交" : "成交样本"}</span>
+                <span><b>{analysisScenario.parcelDataStatus === "legal" ? "法定" : analysisScenario.parcelDataStatus === "proxy" ? "代理" : "演示"}</b>控规地块</span>
+              </div>
+              {(analysisScenario.isImported || analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal") && (
                 <button onClick={restoreDemoScenario}>恢复湖里区演示</button>
               )}
             </div>
@@ -2870,7 +3264,7 @@ export default function Home() {
           <div className="factor-heading">
             <span>评估变量</span>
             <button onClick={() => setFactorView(factorView === "core" ? "all" : "core")}>
-              {factorView === "core" ? "展开 27 项" : "收起"}
+              {factorView === "core" ? `展开 ${housingFactors.length} 项` : "收起"}
             </button>
           </div>
 
@@ -2888,7 +3282,7 @@ export default function Home() {
                       {factor.label}
                       <small>
                         {"ring" in factor
-                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.key === "employment" && analysisScenario.isImported ? "岗位 POI 重力模型" : factor.radius} · 权重 ${activeHousing.weights[factor.key].toFixed(1)}`
+                          ? `${factor.ring === "inner" ? "内" : factor.ring === "middle" ? "中" : "外"} · ${factor.key === "employment" && analysisScenario.isImported ? analysisScenario.routeMatrix ? "近邻岗位路网 + 其余直线" : "岗位 POI 重力模型" : factor.radius} · 权重 ${activeHousing.weights[factor.key].toFixed(1)}`
                           : factor.radius}
                       </small>
                     </span>
@@ -3378,12 +3772,12 @@ export default function Home() {
               </div>
               <div className="audit-row">
                 <span>同城价值指数</span>
-                <i><b style={{ width: `${activeHousing.valueIndex}%` }} /></i>
+                <i><b style={{ width: `${activeHousing.valueIndex.toFixed(3)}%` }} /></i>
                 <strong>{activeHousing.valueIndex.toFixed(1)}</strong>
               </div>
               <div className="audit-row market">
                 <span>房价指数</span>
-                <i><b style={{ width: `${activeHousing.priceIndex}%` }} /></i>
+                <i><b style={{ width: `${activeHousing.priceIndex.toFixed(3)}%` }} /></i>
                 <strong>{activeHousing.priceIndex.toFixed(1)}</strong>
               </div>
               <div className={`residual ${Math.abs(activeHousing.residual) >= 8 ? "large" : ""}`}>
@@ -3555,7 +3949,7 @@ export default function Home() {
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label={panel === "model" ? "模型说明" : panel === "import" ? "导入腾讯地图数据" : "手动添加设施"}
+            aria-label={panel === "model" ? "模型说明" : panel === "import" ? "导入真实规划数据" : "手动添加设施"}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <button className="modal-close" onClick={() => setPanel("none")} aria-label="关闭">
@@ -3565,9 +3959,9 @@ export default function Home() {
             {panel === "import" && (
               <>
                 <span className="modal-kicker">DATA CONNECTOR</span>
-                <h2>从腾讯地图建立真实空间样本</h2>
+                <h2>建立可审计的真实数据链</h2>
                 <p className="modal-lead">
-                  输入任意城市、区县或城区后，系统会重新生成社区样本、设施集合、岗位可达、冲突源和选址候选。岗位通过写字楼、产业园、企业和商务中心 POI 推算；机场、港口、化工园、垃圾/污水设施和货运站会进入强制避让筛查。腾讯地图不提供真实员工数或法定用地属性，相关结果会明确标为代理值。
+                  地图 POI 负责发现位置，OSRM 负责行车时间；企业清单校准岗位和行业，成交记录只用于评分后的享乐价格审计，法定控规面替换代理候选网格。每一层都保留来源等级，不把代理值冒充法定或统计数据。
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -3586,24 +3980,89 @@ export default function Home() {
                   <div className="import-pipeline">
                     <span><b>01</b> POI 分类检索</span>
                     <i>→</i>
-                    <span><b>02</b> 坐标 / 路网距离</span>
+                    <span><b>02</b> OSRM 路网矩阵</span>
                     <i>→</i>
                     <span><b>03</b> 容量品质校准</span>
                   </div>
-                  {importStatus === "error" && (
-                    <div className="form-error">{importErrorMessage || "连接失败，请检查 Key、域名白名单或配额后重试。"}</div>
-                  )}
                   <button className="modal-submit" disabled={importStatus === "loading"}>
                     {importStatus === "loading"
                       ? "正在建立空间索引…"
-                      : "从腾讯地图导入真实 POI"}
+                      : "导入腾讯 POI 并建立 OSRM 矩阵"}
                   </button>
-                  {analysisScenario.isImported && (
-                    <button className="modal-secondary" type="button" onClick={restoreDemoScenario}>
-                      恢复厦门市湖里区内置演示
-                    </button>
-                  )}
                 </form>
+                <section className="qcc-connector" aria-label="企查查就业校准">
+                  <div>
+                    <span>QCC COMPANY MCP</span>
+                    <b>校准行业与岗位人数</b>
+                    <p>保留腾讯地图坐标作为工作地点代理，只对唯一精确主体读取企查查行业与最新年报。人数未披露时，参保人数仅作为下界代理；同名多候选不会自动选中。</p>
+                  </div>
+                  <label>
+                    临时企查查 Token <span>（服务端已配置可留空，不会保存）</span>
+                    <input
+                      value={qccAuthorization}
+                      onChange={(event) => setQccAuthorization(event.target.value)}
+                      placeholder="Bearer …"
+                      type="password"
+                    />
+                  </label>
+                  <button
+                    className="modal-secondary"
+                    type="button"
+                    disabled={!analysisScenario.facilities.some((facility) => facility.type === "employment")}
+                    onClick={() => void handleQccEmploymentCalibration()}
+                  >
+                    用企查查校准当前就业点（最多 6 家）
+                  </button>
+                </section>
+                <div className="file-connectors">
+                  <article>
+                    <span>EMPLOYMENT CSV</span>
+                    <b>企业与就业结构</b>
+                    <p>列：name、lat、lng、industry、employees，可选 coordinate_system=wgs84/gcj02（默认 WGS‑84）。可导入企业平台授权导出或自有清单；缺员工数时明确标记代理。</p>
+                    <label className="file-button">
+                      选择企业 CSV
+                      <input type="file" accept=".csv,text/csv" onChange={handleEnterpriseCsv} />
+                    </label>
+                    <a className="template-link" href="/templates/enterprise-template.csv" download>下载字段模板</a>
+                  </article>
+                  <article>
+                    <span>TRANSACTION CSV</span>
+                    <b>真实成交享乐模型</b>
+                    <p>列：zone_id/小区、unit_price、area、building_age、floor_ratio、green_ratio、distance_cbd_km、transaction_month；至少 30 条并覆盖 3 个小区。</p>
+                    <label className="file-button">
+                      选择成交 CSV
+                      <input type="file" accept=".csv,text/csv" onChange={handleTransactionCsv} />
+                    </label>
+                    <a className="template-link" href="/templates/transaction-template.csv" download>下载 30 条示例模板（非实证）</a>
+                  </article>
+                  <article>
+                    <span>LEGAL GEOJSON</span>
+                    <b>法定控规候选地块</b>
+                    <p>面要含 legal_status、approval_ref、area_ha、land_price_10k_per_mu、zoning_allowed，可选 coordinate_system；没有批准文号的草案不会进入优化器。</p>
+                    <label className="file-button">
+                      选择控规 GeoJSON
+                      <input type="file" accept=".geojson,.json,application/geo+json,application/json" onChange={handleLegalParcelGeoJson} />
+                    </label>
+                    <a className="template-link" href="/templates/legal-parcels-template.geojson" download>下载字段模板（需填批准文号）</a>
+                  </article>
+                </div>
+                <div className="source-catalog">
+                  <b>可接入的权威来源</b>
+                  <a href="https://project-osrm.org/docs/v26.4.0/api/#table-service" target="_blank" rel="noreferrer">OSRM 路网矩阵文档 ↗</a>
+                  <a href="https://www.gsxt.gov.cn/" target="_blank" rel="noreferrer">国家企业信用信息公示系统 ↗</a>
+                  <a href="https://data.sh.gov.cn/view/" target="_blank" rel="noreferrer">上海市公共数据开放平台 ↗</a>
+                  <a href="https://zygh.xm.gov.cn/zwgk/zdxxgk/ghcg/" target="_blank" rel="noreferrer">厦门市自然资源和规划局规划成果 ↗</a>
+                </div>
+                {importErrorMessage && <div className="form-error">{importErrorMessage}</div>}
+                {pipelineStatus && <div className="pipeline-status">{pipelineStatus}</div>}
+                <button className="modal-secondary" type="button" onClick={() => void refreshRouteMatrix()}>
+                  单独刷新当前 OSRM 路网矩阵
+                </button>
+                {(analysisScenario.isImported || analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal") && (
+                  <button className="modal-secondary" type="button" onClick={restoreDemoScenario}>
+                    恢复厦门市湖里区内置演示
+                  </button>
+                )}
               </>
             )}
 
@@ -3675,7 +4134,7 @@ export default function Home() {
                       <article><b>容量竞争 A</b><p>设施容量先在服务圈内按人口需求与距离分摊，再回流到各社区；同一家医院或学校不再被多个社区重复完整使用。医疗等使用高斯衰减，公交使用指数衰减，商业等使用重力衰减。</p></article>
                       <article><b>非线性交互 I</b><p>医疗×公交、教育×绿地、岗位×轨道形成互补奖励；养老服务与低安全、绿地与污染暴露形成冲突惩罚。</p></article>
                       <article><b>人口自适应权重</b><p>老年、儿童与劳动年龄人口按偏好向量混合，并在各空间层内重新归一化。因此同一设施对不同社区的价值不同。</p></article>
-                      <article><b>岗位可达从哪里来</b><p>演示数据为人工情景值；真实区域导入后，写字楼按 800 岗、产业园按 2500 岗、商务中心按 500 岗、普通企业按 80 岗建立代理容量，再用 7.5km 重力衰减除以劳动年龄人口。腾讯地图不提供真实员工数，因此界面同时披露 POI 数与推算岗位数。</p></article>
+                      <article><b>岗位可达与多样性</b><p>岗位可达优先使用 OSRM 30 分钟行车阻抗；企业 CSV 的员工数替换 POI 代理岗位。就业多样性按可达岗位的行业 Shannon 熵、HHI 反向值和行业覆盖面合成，避免“岗位很多但行业单一”获得同等高分。</p></article>
                       <article><b>时间与风险 m(R)</b><p>人口按社区增长率预测；只有数据明确给出投用年/退役年的设施才会进入或退出。地质、洪涝、污染、工业和噪声按最大暴露与加权暴露合成，乘数限制在 0.55–1.0，避免单一风险抹去全部服务价值。</p></article>
                       <article><b>场地冲突红线</b><p>候选点先与机场、港口、化工园、垃圾/污水设施和铁路货运站计算距离。养老、学校在机场 8km 内、港口 5.5km 内直接淘汰；医疗、社区文化和公园采用 6km / 5km 红线。该圆形红线是缺少机场噪声等值线、港区边界时的保守代理，正式规划仍须替换为法定图层。</p></article>
                       <article><b>六类交通构成</b><p>综合交通由步行20%、自行车12%、公交/BRT 28%、地铁25%、道路驾车10%、轮渡/城际5%组成。不同方式使用不同服务距离、容量基准与衰减函数。</p></article>
@@ -3691,7 +4150,7 @@ export default function Home() {
                     </div>
                     <div className="price-rule">
                       <b>房价不进入 V</b>
-                      <p>模型评分完成后，才将同一市场内的对数房价与服务价值分别标准化为 H 与 V。残差 e = H − V 只比较同城相对位置；页面不再用固定文案断言原因，正式结论仍需加入房龄、面积、楼层、月份等控制变量。</p>
+                      <p>模型评分完成后才运行成交审计。导入 CSV 时，对数成交单价使用岭回归并控制面积、房龄、容积率、绿化率、距 CBD、成交月份和服务价值；没有真实成交时才保留同城标准化演示口径。残差是统计关联，不自动解释为投机或低估。</p>
                     </div>
                     <h3 className="algorithm-title">选址建议如何生成</h3>
                     <div className="siting-steps">
@@ -3706,7 +4165,7 @@ export default function Home() {
                     <div className="objective">
                       max J = (1−λ) · 效率收益PV + λ · 公平福利PV − 全生命周期成本 − 风险CVaR
                     </div>
-                    <p className="algorithm-note">四项目标均转换为亿元现值。当前由 {analysisScenario.parcels.length} 个{analysisScenario.isImported ? "待用地核验的代理网格" : "地块"}经过 {analysisScenario.constraints.length} 个冲突源筛查后生成 {generatedCandidates.length} 个候选。硬红线内候选直接剔除；约束图层缺失时只标记为“初筛稳健度”，不再冒充统计置信度。</p>
+                    <p className="algorithm-note">四项目标均转换为亿元现值。当前由 {analysisScenario.parcels.length} 个{analysisScenario.parcelDataStatus === "legal" ? "带批准文号的法定控规地块" : analysisScenario.parcelDataStatus === "proxy" ? "待用地核验的代理网格" : "演示地块"}经过 {analysisScenario.constraints.length} 个冲突源筛查后生成 {generatedCandidates.length} 个候选。硬红线内候选直接剔除；约束图层缺失时只标记为“初筛稳健度”，不再冒充统计置信度。</p>
 
                     <h3 className="algorithm-title">自适应求解器：问题不同，算法不同</h3>
                     <div className="solver-matrix">
