@@ -1,6 +1,8 @@
+import type { RouteMatrixProfile } from "./routing-profiles";
+
 export type TravelTimeMatrix = {
-  source: "osrm_public_demo" | "osrm_custom";
-  profile: "driving";
+  source: "osrm_public_demo" | "osrm_custom" | "openrouteservice";
+  profile: RouteMatrixProfile;
   durationsMinutes: Record<string, number>;
   distancesKm: Record<string, number>;
   generatedAt: string;

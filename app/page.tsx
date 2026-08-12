@@ -61,12 +61,19 @@ import {
 import TencentPlanningMap, {
   type PlanningMapPoint,
 } from "./TencentPlanningMap";
+import TiandituPlanningMap from "./TiandituPlanningMap";
+import {
+  routeProfileLabel,
+  routeProfileOptions,
+  type RouteMatrixProfile,
+} from "./routing-profiles";
 
 type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
 type HousingRing = "inner" | "middle" | "outer";
 type MapScale = "local" | "city" | "region";
 type MapView = "real" | "schematic";
+type MapProvider = "tianditu" | "tencent";
 type Coord = { lat: number; lng: number };
 type DecayType = "gaussian" | "exponential" | "gravity";
 type TransportMode =
@@ -1900,6 +1907,7 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
 async function requestRouteMatrix(
   zones: HousingZone[],
   facilities: Facility[],
+  profile: RouteMatrixProfile = "driving",
 ): Promise<TravelTimeMatrix> {
   if (!zones.length || !facilities.length) {
     throw new Error("需要至少一个社区和一个设施才能建立路网矩阵。");
@@ -1925,6 +1933,7 @@ async function requestRouteMatrix(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        profile,
         sources: zones.map((zone) => ({
           id: zone.id,
           ...zone.coord,
@@ -1948,7 +1957,7 @@ async function requestRouteMatrix(
       distancesKm?: Array<Array<number | null>>;
     };
     if (!response.ok || !payload.sources || !payload.destinations || !payload.durationsMinutes) {
-      throw new Error(payload.error || "OSRM 没有返回有效矩阵。");
+      throw new Error(payload.error || "路网服务没有返回有效矩阵。");
     }
     matrixSource = payload.source ?? matrixSource;
     generatedAt = payload.generatedAt ?? generatedAt;
@@ -1967,13 +1976,15 @@ async function requestRouteMatrix(
   }
   return {
     source: matrixSource,
-    profile: "driving",
+    profile,
     durationsMinutes,
     distancesKm,
     generatedAt,
     destinationCount: routeFacilities.length,
     note:
-      matrixSource === "osrm_public_demo"
+      matrixSource === "openrouteservice"
+        ? `坐标转换后按需调用 OpenRouteService ${profile === "walking" ? "步行" : "骑行"}矩阵；覆盖 ${routeFacilities.length}/${routePool.length} 个近邻岗位点，其余点保留直线距离回退。相同坐标与方式在服务实例内缓存 24 小时，减少额度消耗。`
+        : matrixSource === "osrm_public_demo"
         ? `腾讯/高德坐标先转换为 WGS-84，再调用 OSRM 公共演示服务生成行车时间矩阵；覆盖每个社区最近的岗位点（去重后 ${routeFacilities.length}/${routePool.length}），其余点保留直线距离回退。正式应用应切换自建实例或持牌服务。`
         : `坐标转换后调用自定义 OSRM 实例；覆盖 ${routeFacilities.length}/${routePool.length} 个近邻岗位点，其余点保留直线距离回退。`,
   };
@@ -2041,6 +2052,8 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("housing");
   const [mapScale, setMapScale] = useState<MapScale>("local");
   const [mapView, setMapView] = useState<MapView>("real");
+  const [mapProvider, setMapProvider] = useState<MapProvider>("tianditu");
+  const [routeProfile, setRouteProfile] = useState<RouteMatrixProfile>("driving");
   const [activeHousingId, setActiveHousingId] = useState("donggang");
   const [activeRecommendationId, setActiveRecommendationId] = useState("");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
@@ -2095,6 +2108,8 @@ export default function Home() {
   );
   const tencentMapKey =
     process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim() ?? "";
+  const tiandituMapKey =
+    process.env.NEXT_PUBLIC_TIANDITU_KEY?.trim() ?? "";
 
   const housingScores = useMemo(() => {
     const modelRows = analysisScenario.zones.map((zone) => ({
@@ -2531,25 +2546,30 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2800);
   }
 
-  async function refreshRouteMatrix(scenario = analysisScenario) {
-    setPipelineStatus("正在向 OSRM 请求分批路网矩阵…");
+  async function refreshRouteMatrix(
+    scenario = analysisScenario,
+    profile: RouteMatrixProfile = routeProfile,
+  ) {
+    const profileName = routeProfileLabel(profile);
+    setPipelineStatus(`正在请求${profileName}分批路网矩阵…`);
     try {
       const routeMatrix = await requestRouteMatrix(
         scenario.zones,
         scenario.facilities,
+        profile,
       );
       setAnalysisScenario((current) => ({
         ...current,
         routeMatrix,
-        dataNote: `${current.dataNote} 已建立 ${current.zones.length}×${routeMatrix.destinationCount} OSRM 行车矩阵。`,
+        dataNote: `${current.dataNote} 已建立 ${current.zones.length}×${routeMatrix.destinationCount} ${profileName}矩阵。`,
       }));
       setPipelineStatus(
-        `OSRM 矩阵已就绪：${scenario.zones.length} 个社区 × ${routeMatrix.destinationCount} 个设施。`,
+        `${profileName}矩阵已就绪：${scenario.zones.length} 个社区 × ${routeMatrix.destinationCount} 个岗位/设施。`,
       );
-      showToast("OSRM 路网时间矩阵已更新");
+      showToast(`${profileName}路网时间矩阵已更新`);
       return routeMatrix;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "OSRM 矩阵获取失败。";
+      const message = error instanceof Error ? error.message : "路网矩阵获取失败。";
       setPipelineStatus(`路网矩阵未更新：${message} 当前继续使用直线距离回退。`);
       throw error;
     }
@@ -3360,6 +3380,20 @@ export default function Home() {
               </h1>
             </div>
             <div className="map-actions">
+              {mode === "housing" && mapView === "real" && (
+                <div className="map-provider-switch" aria-label="真实地图底图来源">
+                  <button
+                    className={mapProvider === "tianditu" ? "active" : ""}
+                    onClick={() => setMapProvider("tianditu")}
+                    title="天地图国家地理底图"
+                  >天地图</button>
+                  <button
+                    className={mapProvider === "tencent" ? "active" : ""}
+                    onClick={() => setMapProvider("tencent")}
+                    title="腾讯地图矢量底图"
+                  >腾讯</button>
+                </div>
+              )}
               <button onClick={() => showToast("已聚焦全部分析对象")}>⌖ 全域</button>
               <button onClick={() => setPanel("import")}>⇩ 导入数据</button>
               {mode === "housing" && (
@@ -3380,7 +3414,21 @@ export default function Home() {
               mode === "housing" && mapView === "real" ? "real-map" : ""
             }`}
           >
-            {mode === "housing" && mapView === "real" && (
+            {mode === "housing" && mapView === "real" && mapProvider === "tianditu" && (
+              <TiandituPlanningMap
+                apiKey={tiandituMapKey}
+                scale={mapScale}
+                center={analysisScenario.center}
+                points={realMapPoints}
+                activeZoneId={activeHousingId}
+                activeRecommendationId={resolvedActiveRecommendationId}
+                onZoneSelect={setActiveHousingId}
+                onRecommendationSelect={(recommendationId) =>
+                  activateRecommendation(recommendationId)
+                }
+              />
+            )}
+            {mode === "housing" && mapView === "real" && mapProvider === "tencent" && (
               <TencentPlanningMap
                 apiKey={tencentMapKey}
                 scale={mapScale}
@@ -3980,7 +4028,7 @@ export default function Home() {
                   <div className="import-pipeline">
                     <span><b>01</b> POI 分类检索</span>
                     <i>→</i>
-                    <span><b>02</b> OSRM 路网矩阵</span>
+                    <span><b>02</b> 多方式路网矩阵</span>
                     <i>→</i>
                     <span><b>03</b> 容量品质校准</span>
                   </div>
@@ -4049,15 +4097,36 @@ export default function Home() {
                 <div className="source-catalog">
                   <b>可接入的权威来源</b>
                   <a href="https://project-osrm.org/docs/v26.4.0/api/#table-service" target="_blank" rel="noreferrer">OSRM 路网矩阵文档 ↗</a>
+                  <a href="https://giscience.github.io/openrouteservice/api-reference/endpoints/matrix/" target="_blank" rel="noreferrer">OpenRouteService Matrix 文档 ↗</a>
+                  <a href="https://lbs.tianditu.gov.cn/api/js4.0/pages-class/MapOptions.html" target="_blank" rel="noreferrer">天地图 JavaScript API 文档 ↗</a>
                   <a href="https://www.gsxt.gov.cn/" target="_blank" rel="noreferrer">国家企业信用信息公示系统 ↗</a>
                   <a href="https://data.sh.gov.cn/view/" target="_blank" rel="noreferrer">上海市公共数据开放平台 ↗</a>
                   <a href="https://zygh.xm.gov.cn/zwgk/zdxxgk/ghcg/" target="_blank" rel="noreferrer">厦门市自然资源和规划局规划成果 ↗</a>
                 </div>
                 {importErrorMessage && <div className="form-error">{importErrorMessage}</div>}
                 {pipelineStatus && <div className="pipeline-status">{pipelineStatus}</div>}
-                <button className="modal-secondary" type="button" onClick={() => void refreshRouteMatrix()}>
-                  单独刷新当前 OSRM 路网矩阵
-                </button>
+                <section className="route-matrix-control" aria-label="岗位可达出行方式">
+                  <div>
+                    <b>岗位可达路网方式</b>
+                    <span>驾车默认走 OSRM；步行/骑行按需消耗 ORS 矩阵额度。结果仅替换岗位可达阻抗，不把不同方式混成一个分数。</span>
+                    {analysisScenario.routeMatrix && (
+                      <small>当前生效：{routeProfileLabel(analysisScenario.routeMatrix.profile)} · {analysisScenario.routeMatrix.destinationCount} 个目的地 · {analysisScenario.routeMatrix.source}</small>
+                    )}
+                  </div>
+                  <select
+                    value={routeProfile}
+                    onChange={(event) => setRouteProfile(event.target.value as RouteMatrixProfile)}
+                  >
+                    {routeProfileOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} · {option.quotaNote}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="modal-secondary" type="button" onClick={() => void refreshRouteMatrix()}>
+                    按所选方式刷新路网矩阵
+                  </button>
+                </section>
                 {(analysisScenario.isImported || analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal") && (
                   <button className="modal-secondary" type="button" onClick={restoreDemoScenario}>
                     恢复厦门市湖里区内置演示
@@ -4134,7 +4203,7 @@ export default function Home() {
                       <article><b>容量竞争 A</b><p>设施容量先在服务圈内按人口需求与距离分摊，再回流到各社区；同一家医院或学校不再被多个社区重复完整使用。医疗等使用高斯衰减，公交使用指数衰减，商业等使用重力衰减。</p></article>
                       <article><b>非线性交互 I</b><p>医疗×公交、教育×绿地、岗位×轨道形成互补奖励；养老服务与低安全、绿地与污染暴露形成冲突惩罚。</p></article>
                       <article><b>人口自适应权重</b><p>老年、儿童与劳动年龄人口按偏好向量混合，并在各空间层内重新归一化。因此同一设施对不同社区的价值不同。</p></article>
-                      <article><b>岗位可达与多样性</b><p>岗位可达优先使用 OSRM 30 分钟行车阻抗；企业 CSV 的员工数替换 POI 代理岗位。就业多样性按可达岗位的行业 Shannon 熵、HHI 反向值和行业覆盖面合成，避免“岗位很多但行业单一”获得同等高分。</p></article>
+                      <article><b>岗位可达与多样性</b><p>岗位可达使用当前所选路网方式的 30 分钟阻抗：驾车走 OSRM，步行/骑行走 ORS；企业 CSV 的员工数替换 POI 代理岗位。就业多样性按可达岗位的行业 Shannon 熵、HHI 反向值和行业覆盖面合成，避免“岗位很多但行业单一”获得同等高分。</p></article>
                       <article><b>时间与风险 m(R)</b><p>人口按社区增长率预测；只有数据明确给出投用年/退役年的设施才会进入或退出。地质、洪涝、污染、工业和噪声按最大暴露与加权暴露合成，乘数限制在 0.55–1.0，避免单一风险抹去全部服务价值。</p></article>
                       <article><b>场地冲突红线</b><p>候选点先与机场、港口、化工园、垃圾/污水设施和铁路货运站计算距离。养老、学校在机场 8km 内、港口 5.5km 内直接淘汰；医疗、社区文化和公园采用 6km / 5km 红线。该圆形红线是缺少机场噪声等值线、港区边界时的保守代理，正式规划仍须替换为法定图层。</p></article>
                       <article><b>六类交通构成</b><p>综合交通由步行20%、自行车12%、公交/BRT 28%、地铁25%、道路驾车10%、轮渡/城际5%组成。不同方式使用不同服务距离、容量基准与衰减函数。</p></article>
