@@ -698,18 +698,69 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 5px;
 }
 
-.map-provider-switch {
+.map-fusion-badge {
   display: inline-flex;
-  padding: 2px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
   border: 1px solid #cbd1ca;
   border-radius: 8px;
+  color: #315b4d;
   background: rgba(255, 255, 255, 0.54);
+  font-size: 9px;
+  font-weight: 750;
 }
 
-.map-provider-switch button {
-  border: 0;
-  padding: 5px 7px;
-  background: transparent;
+.map-fusion-badge i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #397f99 0 48%, #9bc251 52% 100%);
+  box-shadow: 0 0 0 3px rgba(83, 132, 111, 0.1);
+}
+
+.map-source-legend {
+  position: absolute;
+  left: 15px;
+  bottom: 52px;
+  z-index: 14;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 7px;
+  color: #4d6159;
+  background: rgba(251, 250, 245, 0.88);
+  box-shadow: 0 5px 18px rgba(10, 23, 20, 0.1);
+  backdrop-filter: blur(9px);
+}
+
+.map-source-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 8px;
+}
+
+.map-source-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.map-source-legend .source-tencent {
+  background: #477c92;
+}
+
+.map-source-legend .source-tianditu {
+  border: 2px solid #29788b;
+  background: rgba(58, 145, 164, 0.22);
+}
+
+.map-source-legend .source-verified {
+  border: 2px solid #668925;
+  background: rgba(171, 205, 77, 0.32);
 }
 
 .map-actions button {
@@ -783,17 +834,6 @@ input[type="range"]::-webkit-slider-thumb {
 
 .tencent-map-status.error {
   color: #9c4c40;
-}
-
-.tianditu-map-shell .tdt-label {
-  padding: 4px 7px !important;
-  border: 1px solid rgba(255, 255, 255, 0.86) !important;
-  border-radius: 6px !important;
-  color: #17352d !important;
-  background: rgba(251, 250, 245, 0.9) !important;
-  box-shadow: 0 4px 14px rgba(10, 23, 20, 0.14) !important;
-  font: 600 11px/1.2 system-ui, "Microsoft YaHei", sans-serif !important;
-  white-space: nowrap;
 }
 
 .real-map-caption {

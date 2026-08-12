@@ -61,7 +61,7 @@ import {
 import TencentPlanningMap, {
   type PlanningMapPoint,
 } from "./TencentPlanningMap";
-import TiandituPlanningMap from "./TiandituPlanningMap";
+import { fuseMapPois, type MapPoiSource } from "./map-fusion";
 import {
   routeProfileLabel,
   routeProfileOptions,
@@ -73,7 +73,6 @@ type MetricMap = Record<string, number>;
 type HousingRing = "inner" | "middle" | "outer";
 type MapScale = "local" | "city" | "region";
 type MapView = "real" | "schematic";
-type MapProvider = "tianditu" | "tencent";
 type Coord = { lat: number; lng: number };
 type DecayType = "gaussian" | "exponential" | "gravity";
 type TransportMode =
@@ -124,6 +123,7 @@ type Facility = Coord & {
   openingYear: number;
   closingYear?: number;
   lifecycleSource?: "demo" | "tencent_poi" | "planning" | "manual" | "optimizer";
+  mapSource?: MapPoiSource;
   transportMode?: TransportMode;
   industryCategory?: string;
   employmentSource?: "poi_proxy" | "enterprise_csv" | "qcc_calibrated";
@@ -137,6 +137,8 @@ type TencentPoi = {
   poiCategory?: string;
   lat: number;
   lng: number;
+  source?: MapPoiSource;
+  sourceDetail?: string;
 };
 
 type ConstraintKind =
@@ -1865,6 +1867,7 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
       quality: mapping.type === "employment" ? 0.72 : 0.78,
       openingYear: BASE_YEAR,
       lifecycleSource: "tencent_poi" as const,
+      mapSource: point.source ?? "tencent",
       transportMode: mapping.transportMode,
       industryCategory: undefined,
       employmentSource:
@@ -1900,7 +1903,7 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
     estimatedJobs,
     employmentDataStatus: "poi_proxy",
     parcelDataStatus: "proxy",
-    dataNote: `已用腾讯地图位置与类别建立 ${zones.length} 个社区样本、${facilities.length} 个服务/岗位 POI，并检索 ${constraints.length} 个机场、港口等冲突源。岗位数和候选用地仍是代理值，必须用统计/规划数据校准。`,
+    dataNote: `已用腾讯位置服务与天地图融合数据建立 ${zones.length} 个社区样本、${facilities.length} 个服务/岗位 POI，并检索 ${constraints.length} 个机场、港口等冲突源。岗位数和候选用地仍是代理值，必须用统计/规划数据校准。`,
   };
 }
 
@@ -2052,7 +2055,6 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("housing");
   const [mapScale, setMapScale] = useState<MapScale>("local");
   const [mapView, setMapView] = useState<MapView>("real");
-  const [mapProvider, setMapProvider] = useState<MapProvider>("tianditu");
   const [routeProfile, setRouteProfile] = useState<RouteMatrixProfile>("driving");
   const [activeHousingId, setActiveHousingId] = useState("donggang");
   const [activeRecommendationId, setActiveRecommendationId] = useState("");
@@ -2108,8 +2110,6 @@ export default function Home() {
   );
   const tencentMapKey =
     process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim() ?? "";
-  const tiandituMapKey =
-    process.env.NEXT_PUBLIC_TIANDITU_KEY?.trim() ?? "";
 
   const housingScores = useMemo(() => {
     const modelRows = analysisScenario.zones.map((zone) => ({
@@ -2187,6 +2187,7 @@ export default function Home() {
         lat: facility.lat,
         lng: facility.lng,
         kind: "facility" as const,
+        source: facility.mapSource ?? "model",
       })),
       ...analysisScenario.constraints.map((constraint) => ({
         id: constraint.id,
@@ -2848,12 +2849,40 @@ export default function Home() {
           poiCategory: point.poiCategory,
           lat: point.lat!,
           lng: point.lng!,
+          source: "tencent",
         }));
       if (!validPoints.length) throw new Error("no valid poi");
       const resolvedRegion = result.region ?? importRegion.trim();
+      let fusedPoints = validPoints;
+      let fusionNote = "天地图增强暂不可用，本次仍使用腾讯位置服务完成分析。";
+      try {
+        const center = {
+          lat: validPoints.reduce((sum, point) => sum + point.lat, 0) / validPoints.length,
+          lng: validPoints.reduce((sum, point) => sum + point.lng, 0) / validPoints.length,
+        };
+        const tdtResponse = await fetch("/api/tianditu/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ center, mode, radiusMeters: 8_000 }),
+        });
+        const tdtPayload = (await tdtResponse.json()) as {
+          error?: string;
+          points?: TencentPoi[];
+        };
+        if (tdtResponse.ok && tdtPayload.points?.length) {
+          const fusion = fuseMapPois(validPoints, tdtPayload.points.map((point) => ({
+            ...point,
+            source: point.source ?? "tianditu",
+          })));
+          fusedPoints = fusion.points;
+          fusionNote = `天地图补充 ${fusion.supplementedCount} 个权威公共设施，另有 ${fusion.crossVerifiedCount} 个点与腾讯结果交叉确认。`;
+        }
+      } catch {
+        // 天地图是增强源；失败时不阻断腾讯底图与主分析流程。
+      }
       if (mode === "worldcup") {
         const importedFacilities = buildImportedWorldCupFacilities(
-          validPoints,
+          fusedPoints,
           activeStadium.id,
         );
         if (!importedFacilities.length) {
@@ -2870,13 +2899,13 @@ export default function Home() {
         setManualLat(String(validPoints[0].lat));
         setManualLng(String(validPoints[0].lng));
         setWorldCupDataNote(
-          `腾讯 POI 已为 ${activeStadium.name} 导入 ${importedFacilities.length} 个赛事设施；容量为可编辑代理值。`,
+          `融合地图已为 ${activeStadium.name} 导入 ${importedFacilities.length} 个赛事设施；${fusionNote} 容量为可编辑代理值。`,
         );
         showToast(
           `已从${resolvedRegion}导入 ${importedFacilities.length} 个赛事设施并重算承载力`,
         );
       } else {
-        const nextScenario = buildImportedScenario(resolvedRegion, validPoints);
+        const nextScenario = buildImportedScenario(resolvedRegion, fusedPoints);
         if (!nextScenario.zones.length) throw new Error("no valid zones");
         setAnalysisScenario(nextScenario);
         setActiveHousingId(nextScenario.zones[0].id);
@@ -2897,9 +2926,9 @@ export default function Home() {
             routeMatrix,
             dataNote: `${current.dataNote} 已建立 ${current.zones.length}×${routeMatrix.destinationCount} OSRM 行车矩阵。`,
           }));
-          setPipelineStatus(`腾讯 POI + OSRM 已就绪：${nextScenario.zones.length}×${routeMatrix.destinationCount} 路网矩阵。`);
+          setPipelineStatus(`融合地图 + OSRM 已就绪：${nextScenario.zones.length}×${routeMatrix.destinationCount} 路网矩阵。${fusionNote}`);
         } catch {
-          setPipelineStatus("腾讯 POI 已接入；OSRM 公共服务暂不可用，距离暂按球面直线回退。");
+          setPipelineStatus(`融合地图已接入；OSRM 公共服务暂不可用，距离暂按球面直线回退。${fusionNote}`);
         }
         showToast(`已切换到${nextScenario.region}并重算空间模型`);
       }
@@ -3381,17 +3410,9 @@ export default function Home() {
             </div>
             <div className="map-actions">
               {mode === "housing" && mapView === "real" && (
-                <div className="map-provider-switch" aria-label="真实地图底图来源">
-                  <button
-                    className={mapProvider === "tianditu" ? "active" : ""}
-                    onClick={() => setMapProvider("tianditu")}
-                    title="天地图国家地理底图"
-                  >天地图</button>
-                  <button
-                    className={mapProvider === "tencent" ? "active" : ""}
-                    onClick={() => setMapProvider("tencent")}
-                    title="腾讯地图矢量底图"
-                  >腾讯</button>
+                <div className="map-fusion-badge" aria-label="腾讯地图与天地图融合视图">
+                  <i />
+                  腾讯底图 × 天地图增强
                 </div>
               )}
               <button onClick={() => showToast("已聚焦全部分析对象")}>⌖ 全域</button>
@@ -3414,21 +3435,7 @@ export default function Home() {
               mode === "housing" && mapView === "real" ? "real-map" : ""
             }`}
           >
-            {mode === "housing" && mapView === "real" && mapProvider === "tianditu" && (
-              <TiandituPlanningMap
-                apiKey={tiandituMapKey}
-                scale={mapScale}
-                center={analysisScenario.center}
-                points={realMapPoints}
-                activeZoneId={activeHousingId}
-                activeRecommendationId={resolvedActiveRecommendationId}
-                onZoneSelect={setActiveHousingId}
-                onRecommendationSelect={(recommendationId) =>
-                  activateRecommendation(recommendationId)
-                }
-              />
-            )}
-            {mode === "housing" && mapView === "real" && mapProvider === "tencent" && (
+            {mode === "housing" && mapView === "real" && (
               <TencentPlanningMap
                 apiKey={tencentMapKey}
                 scale={mapScale}
@@ -3441,6 +3448,13 @@ export default function Home() {
                   activateRecommendation(recommendationId)
                 }
               />
+            )}
+            {mode === "housing" && mapView === "real" && analysisScenario.isImported && (
+              <div className="map-source-legend" aria-label="融合数据来源图例">
+                <span><i className="source-tencent" />腾讯位置</span>
+                <span><i className="source-tianditu" />天地图补充</span>
+                <span><i className="source-verified" />双源确认</span>
+              </div>
             )}
             {mode === "housing" && housingOptimization.selected.length > 0 && (
               <div className="optimization-map-status">

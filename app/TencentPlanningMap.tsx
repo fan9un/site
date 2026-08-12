@@ -13,6 +13,7 @@ export type PlanningMapPoint = {
   score?: number;
   rank?: number;
   serviceRadiusKm?: number;
+  source?: "tencent" | "tianditu" | "cross_verified" | "model";
 };
 
 type TencentMapInstance = {
@@ -213,6 +214,18 @@ export default function TencentPlanningMap({
           anchor: { x: 8, y: 24 },
           src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
         }),
+        tianditu: new TMap.MarkerStyle({
+          width: 19,
+          height: 27,
+          anchor: { x: 9, y: 27 },
+          src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
+        }),
+        crossVerified: new TMap.MarkerStyle({
+          width: 24,
+          height: 34,
+          anchor: { x: 12, y: 34 },
+          src: "https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/markerDefault.png",
+        }),
         recommendation: new TMap.MarkerStyle({
           width: 34,
           height: 47,
@@ -245,7 +258,11 @@ export default function TencentPlanningMap({
                   ? "zone"
                   : point.kind === "constraint"
                     ? "constraint"
-                  : "facility",
+                    : point.source === "cross_verified"
+                      ? "crossVerified"
+                      : point.source === "tianditu"
+                        ? "tianditu"
+                        : "facility",
           position: new TMap.LatLng(point.lat, point.lng),
           properties: { kind: point.kind },
         })),
@@ -272,6 +289,11 @@ export default function TencentPlanningMap({
     const constraints = visiblePoints.filter(
       (point) => point.kind === "constraint",
     );
+    const sourcePoints = scale === "local"
+      ? visiblePoints.filter(
+          (point) => point.source === "tianditu" || point.source === "cross_verified",
+        )
+      : [];
     labelLayerRef.current = new TMap.MultiLabel({
       id: "planning-labels",
       map,
@@ -322,7 +344,7 @@ export default function TencentPlanningMap({
 
     const MultiCircle = TMap.MultiCircle;
     const CircleStyle = TMap.CircleStyle;
-    if (MultiCircle && CircleStyle && recommendations.length) {
+    if (MultiCircle && CircleStyle && (recommendations.length || sourcePoints.length)) {
       circleLayerRef.current = new MultiCircle({
         id: "recommendation-service-circles",
         map,
@@ -339,13 +361,33 @@ export default function TencentPlanningMap({
             borderColor: "rgba(98, 128, 35, 0.92)",
             borderWidth: 3,
           }),
+          tianditu: new CircleStyle({
+            color: "rgba(58, 145, 164, 0.18)",
+            showBorder: true,
+            borderColor: "rgba(41, 120, 139, 0.88)",
+            borderWidth: 2,
+          }),
+          crossVerified: new CircleStyle({
+            color: "rgba(171, 205, 77, 0.24)",
+            showBorder: true,
+            borderColor: "rgba(102, 137, 37, 0.92)",
+            borderWidth: 3,
+          }),
         },
-        geometries: recommendations.map((point) => ({
-          id: `circle-${point.id}`,
-          styleId: point.id === activeRecommendationId ? "active" : "recommendation",
-          center: new TMap.LatLng(point.lat, point.lng),
-          radius: Math.max(250, (point.serviceRadiusKm ?? 1) * 1000),
-        })),
+        geometries: [
+          ...recommendations.map((point) => ({
+            id: `circle-${point.id}`,
+            styleId: point.id === activeRecommendationId ? "active" : "recommendation",
+            center: new TMap.LatLng(point.lat, point.lng),
+            radius: Math.max(250, (point.serviceRadiusKm ?? 1) * 1000),
+          })),
+          ...sourcePoints.map((point) => ({
+            id: `source-circle-${point.id}`,
+            styleId: point.source === "cross_verified" ? "crossVerified" : "tianditu",
+            center: new TMap.LatLng(point.lat, point.lng),
+            radius: point.source === "cross_verified" ? 115 : 85,
+          })),
+        ],
       });
     }
   }, [
@@ -370,8 +412,8 @@ export default function TencentPlanningMap({
         </div>
       )}
       <div className="real-map-caption">
-        <b>腾讯地图 · GCJ-02</b>
-        <span>真实海岸线、岛屿、道路与地名</span>
+        <b>腾讯底图 × 天地图权威增强</b>
+        <span>道路/海岸线 · 行政地名 · 跨源公共设施核验</span>
       </div>
     </div>
   );
