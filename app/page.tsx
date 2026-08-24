@@ -226,6 +226,7 @@ type Stadium = {
   capacity: number;
   coord?: Coord;
   dataSource?: "demo" | "manual" | "map_import";
+  regionKey?: WorldCupRegionKey;
   mapSource?: MapPoiSource;
   metrics: MetricMap;
   limits: {
@@ -238,6 +239,16 @@ type Stadium = {
 };
 
 type MatchScenarioKey = "group" | "knockout" | "final";
+
+type WorldCupDemoRegionKey =
+  | "jingjinji"
+  | "yangtze_delta"
+  | "greater_bay"
+  | "chengyu"
+  | "middle_yangtze"
+  | "shandong_peninsula";
+
+type WorldCupRegionKey = WorldCupDemoRegionKey | "map_import";
 
 type StadiumIntervention = {
   id: string;
@@ -648,9 +659,9 @@ const housingZones: HousingZone[] = [
 
 const stadiums: Stadium[] = [
   {
-    id: "linhai",
-    name: "临海竞赛中心",
-    city: "东部赛区 · 候选场馆",
+    id: "profile-constrained",
+    name: "承载短板场馆模板",
+    city: "能力剖面 · 新建候选",
     capacity: 50000,
     metrics: {
       transit: 36,
@@ -667,9 +678,9 @@ const stadiums: Stadium[] = [
     limits: { 交通: 18000, 住宿: 4000, 餐饮: 12000, 医疗: 6500, 公卫: 14500 },
   },
   {
-    id: "longcheng",
-    name: "龙城体育公园",
-    city: "中部赛区 · 既有场馆",
+    id: "profile-balanced",
+    name: "成熟配套场馆模板",
+    city: "能力剖面 · 既有场馆",
     capacity: 62000,
     metrics: {
       transit: 78,
@@ -686,9 +697,9 @@ const stadiums: Stadium[] = [
     limits: { 交通: 48000, 住宿: 39600, 餐饮: 50500, 医疗: 45200, 公卫: 41000 },
   },
   {
-    id: "huanqiu",
-    name: "寰球足球场",
-    city: "北部赛区 · 改扩建",
+    id: "profile-retrofit",
+    name: "改扩建场馆模板",
+    city: "能力剖面 · 改扩建",
     capacity: 42000,
     metrics: {
       transit: 82,
@@ -705,6 +716,98 @@ const stadiums: Stadium[] = [
     limits: { 交通: 38000, 住宿: 33200, 餐饮: 31000, 医疗: 35000, 公卫: 25600 },
   },
 ];
+
+const worldCupRegionOptions: Array<{
+  key: WorldCupDemoRegionKey;
+  label: string;
+  importRegion: string;
+  note: string;
+  venues: Array<{ id: string; name: string; city: string }>;
+}> = [
+  {
+    key: "jingjinji",
+    label: "京津冀联合赛区",
+    importRegion: "北京市",
+    note: "检验超大城市轨道分流、跨城接驳与住宿共享能力",
+    venues: [
+      { id: "capital", name: "北京主赛场模板", city: "北京 · 既有主场" },
+      { id: "harbor", name: "天津滨海场馆模板", city: "天津 · 改扩建" },
+      { id: "xiongan", name: "雄安新城场馆模板", city: "雄安 · 新建候选" },
+    ],
+  },
+  {
+    key: "yangtze_delta",
+    label: "长三角联合赛区",
+    importRegion: "上海市",
+    note: "检验高密度多中心城市群的高铁分流与跨城住宿调度",
+    venues: [
+      { id: "shanghai", name: "上海主赛场模板", city: "上海 · 既有主场" },
+      { id: "hangzhou", name: "杭州奥体场馆模板", city: "杭州 · 改扩建" },
+      { id: "nanjing", name: "南京新城场馆模板", city: "南京 · 新建候选" },
+    ],
+  },
+  {
+    key: "greater_bay",
+    label: "粤港澳大湾区联合赛区",
+    importRegion: "广州市",
+    note: "检验跨江通道、机场群、口岸客流与高峰住宿供给",
+    venues: [
+      { id: "guangzhou", name: "广州主赛场模板", city: "广州 · 既有主场" },
+      { id: "shenzhen", name: "深圳湾场馆模板", city: "深圳 · 改扩建" },
+      { id: "zhuhai", name: "珠海新城场馆模板", city: "珠海 · 新建候选" },
+    ],
+  },
+  {
+    key: "chengyu",
+    label: "成渝联合赛区",
+    importRegion: "成都市",
+    note: "检验双核都市圈的城际交通、山地疏散与赛后复用",
+    venues: [
+      { id: "chengdu", name: "成都主赛场模板", city: "成都 · 既有主场" },
+      { id: "chongqing", name: "重庆场馆模板", city: "重庆 · 改扩建" },
+      { id: "tianfu", name: "天府新城场馆模板", city: "天府新区 · 新建候选" },
+    ],
+  },
+  {
+    key: "middle_yangtze",
+    label: "长江中游联合赛区",
+    importRegion: "武汉市",
+    note: "检验武汉、长沙、南昌之间的高铁协同与区域客流承接",
+    venues: [
+      { id: "wuhan", name: "武汉主赛场模板", city: "武汉 · 既有主场" },
+      { id: "changsha", name: "长沙场馆模板", city: "长沙 · 改扩建" },
+      { id: "nanchang", name: "南昌新城场馆模板", city: "南昌 · 新建候选" },
+    ],
+  },
+  {
+    key: "shandong_peninsula",
+    label: "山东半岛联合赛区",
+    importRegion: "济南市",
+    note: "检验济青双核、沿海旅游住宿与跨城赛事运输能力",
+    venues: [
+      { id: "jinan", name: "济南主赛场模板", city: "济南 · 既有主场" },
+      { id: "qingdao", name: "青岛场馆模板", city: "青岛 · 改扩建" },
+      { id: "yantai", name: "烟台滨海场馆模板", city: "烟台 · 新建候选" },
+    ],
+  },
+];
+
+function buildWorldCupRegionStadiums(regionKey: WorldCupDemoRegionKey) {
+  const region = worldCupRegionOptions.find((item) => item.key === regionKey)!;
+  return region.venues.map((venue, index): Stadium => {
+    const profile = stadiums[index % stadiums.length];
+    return {
+      ...profile,
+      id: `${region.key}-${venue.id}`,
+      name: venue.name,
+      city: venue.city,
+      dataSource: "demo",
+      regionKey: region.key,
+      metrics: { ...profile.metrics },
+      limits: { ...profile.limits },
+    };
+  });
+}
 
 const matchScenarios: Record<
   MatchScenarioKey,
@@ -836,10 +939,10 @@ const housingMarkers = [
 ];
 
 const cupMarkers = [
-  { x: 44, y: 42, icon: "场", label: "临海竞赛中心", tone: "coral", ring: "middle" },
-  { x: 20, y: 71, icon: "站", label: "临港站", tone: "blue", ring: "middle" },
-  { x: 74, y: 27, icon: "宿", label: "现有旅馆群", tone: "lime", ring: "middle" },
-  { x: 79, y: 72, icon: "医", label: "赛事医院", tone: "coral", ring: "middle" },
+  { x: 44, y: 42, icon: "场", label: "当前评估场馆", tone: "coral", ring: "middle" },
+  { x: 20, y: 71, icon: "站", label: "综合交通节点", tone: "blue", ring: "middle" },
+  { x: 74, y: 27, icon: "宿", label: "住宿设施群", tone: "lime", ring: "middle" },
+  { x: 79, y: 72, icon: "医", label: "赛事医疗中心", tone: "coral", ring: "middle" },
 ];
 
 const BASE_YEAR = 2026;
@@ -1617,6 +1720,7 @@ function optimizeWorldCupPortfolio(
 ) {
   const candidates = stadiumInterventions.filter((intervention) =>
     intervention.appliesTo.includes(stadium.id) ||
+    Boolean(stadium.regionKey && stadium.regionKey !== "map_import") ||
     Boolean(stadium.dataSource && stadium.dataSource !== "demo"),
   );
   let selected: StadiumIntervention[] = [];
@@ -2241,7 +2345,9 @@ export default function Home() {
   const [activeHousingId, setActiveHousingId] = useState("");
   const [activeRecommendationId, setActiveRecommendationId] = useState("");
   const [activeCupInterventionId, setActiveCupInterventionId] = useState("");
-  const [activeStadiumId, setActiveStadiumId] = useState("linhai");
+  const [worldCupRegionKey, setWorldCupRegionKey] =
+    useState<WorldCupRegionKey>("jingjinji");
+  const [activeStadiumId, setActiveStadiumId] = useState("jingjinji-capital");
   const [fairnessWeight, setFairnessWeight] = useState(68);
   const [budget, setBudget] = useState(3.2);
   const [forecastYear, setForecastYear] = useState(2030);
@@ -2260,8 +2366,10 @@ export default function Home() {
   const [worldCupFacilities, setWorldCupFacilities] =
     useState<ManualWorldCupFacility[]>([]);
   const [customStadiums, setCustomStadiums] = useState<Stadium[]>([]);
-  const [worldCupRegion, setWorldCupRegion] = useState("中国 · 东部候选赛区");
-  const [worldCupDataNote, setWorldCupDataNote] = useState("内置场馆容量情景");
+  const [worldCupRegion, setWorldCupRegion] = useState("京津冀联合赛区");
+  const [worldCupDataNote, setWorldCupDataNote] = useState(
+    "规划试算模板：检验超大城市轨道分流、跨城接驳与住宿共享能力；场馆名称与数值不代表真实规划。",
+  );
   const [manualName, setManualName] = useState("");
   const [manualType, setManualType] = useState("社区卫生服务中心");
   const [manualCapacity, setManualCapacity] = useState("1200");
@@ -2399,9 +2507,21 @@ export default function Home() {
     housingScores.find((zone) => zone.id === activeHousingId) ??
     housingScores[0] ??
     emptyHousingView;
+  const regionStadiums = useMemo(
+    () =>
+      worldCupRegionKey === "map_import"
+        ? []
+        : buildWorldCupRegionStadiums(worldCupRegionKey),
+    [worldCupRegionKey],
+  );
   const availableStadiums = useMemo(
-    () => [...stadiums, ...customStadiums],
-    [customStadiums],
+    () => [
+      ...regionStadiums,
+      ...customStadiums.filter(
+        (stadium) => stadium.regionKey === worldCupRegionKey,
+      ),
+    ],
+    [customStadiums, regionStadiums, worldCupRegionKey],
   );
   const activeStadium = useMemo(() => {
     const base =
@@ -2782,7 +2902,25 @@ export default function Home() {
         : housingMarkers.filter((marker) => marker.ring === currentScale.ring)
       : hasWorldCupSpatialData
         ? []
-        : cupMarkers;
+        : cupMarkers.map((marker, index) =>
+            index === 0 ? { ...marker, label: activeStadium.name } : marker,
+          );
+
+  function selectWorldCupRegion(nextKey: WorldCupDemoRegionKey) {
+    const region = worldCupRegionOptions.find((item) => item.key === nextKey)!;
+    const nextStadiums = buildWorldCupRegionStadiums(nextKey);
+    setWorldCupRegionKey(nextKey);
+    setWorldCupRegion(region.label);
+    setWorldCupDataNote(
+      `规划试算模板：${region.note}；场馆名称与数值不代表真实规划。`,
+    );
+    setActiveStadiumId(nextStadiums[0].id);
+    setActiveCupInterventionId("");
+    setMapView("schematic");
+    setMapScale("local");
+    setImportRegion(region.importRegion);
+    showToast(`已切换到${region.label}，评估与组合选址已重新计算`);
+  }
 
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
@@ -3163,10 +3301,14 @@ export default function Home() {
           throw new Error("已找到场馆，但周边没有检索到可转换为承载能力的酒店、交通、医疗、餐饮或公卫设施。");
         }
         setCustomStadiums((items) => [
-          ...items.filter((stadium) => stadium.dataSource !== "map_import"),
-          ...imported.stadiums,
+          ...items.filter((stadium) => stadium.regionKey !== "map_import"),
+          ...imported.stadiums.map((stadium) => ({
+            ...stadium,
+            regionKey: "map_import" as const,
+          })),
         ]);
         setWorldCupFacilities(imported.facilities);
+        setWorldCupRegionKey("map_import");
         setActiveStadiumId(imported.stadiums[0].id);
         setActiveCupInterventionId("");
         setWorldCupRegion(resolvedRegion);
@@ -3370,6 +3512,7 @@ export default function Home() {
         capacity,
         coord,
         dataSource: "manual",
+        regionKey: worldCupRegionKey,
         metrics: {
           transit: 50,
           lodging: 45,
@@ -3574,7 +3717,23 @@ export default function Home() {
             </div>
           ) : (
             <div className="scenario-control">
-              <label htmlFor="active-stadium">评估场馆</label>
+              <label htmlFor="worldcup-region">候选赛区</label>
+              <select
+                id="worldcup-region"
+                value={worldCupRegionKey}
+                onChange={(event) => {
+                  const nextKey = event.target.value as WorldCupRegionKey;
+                  if (nextKey !== "map_import") selectWorldCupRegion(nextKey);
+                }}
+              >
+                {worldCupRegionOptions.map((region) => (
+                  <option value={region.key} key={region.key}>{region.label}</option>
+                ))}
+                {worldCupRegionKey === "map_import" && (
+                  <option value="map_import">地图导入 · {worldCupRegion}</option>
+                )}
+              </select>
+              <label htmlFor="active-stadium">赛区内场馆</label>
               <select
                 id="active-stadium"
                 value={activeStadiumId}
@@ -3598,7 +3757,7 @@ export default function Home() {
                   <option value={key} key={key}>{scenario.label}</option>
                 ))}
               </select>
-              <small>{worldCupDataNote} 观众规模、外地客比例与多场并发会同步改变需求链。</small>
+              <small>{worldCupDataNote} 切换赛区、场馆或赛事需求后，承载链和组合选址会同步重算。</small>
             </div>
           )}
 
@@ -3635,20 +3794,28 @@ export default function Home() {
             </div>
           ))}
 
-          {mode === "worldcup" && hasImportedWorldCupData && (
-            <div className="data-provenance proxy">
+          {mode === "worldcup" && (
+            <div className={`data-provenance ${hasImportedWorldCupData ? "proxy" : "demo"}`}>
               <div>
                 <b>{worldCupRegion}</b>
-                <span>融合地图赛事场景</span>
+                <span>{hasImportedWorldCupData ? "融合地图赛事场景" : "多赛区规划试算"}</span>
               </div>
               <p>{worldCupDataNote}</p>
-              <div className="provenance-stats">
-                <span><b>{customStadiums.filter((stadium) => stadium.dataSource === "map_import").length}</b>地图场馆</span>
-                <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id).length}</b>周边设施</span>
-                <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id && facility.routeMinutes !== undefined).length}</b>路网校准</span>
-                <span><b>{worldCupFacilities.filter((facility) => facility.source === "tianditu").length}</b>天地图补充</span>
-                <span><b>{worldCupFacilities.filter((facility) => facility.source === "cross_verified").length}</b>双源确认</span>
-              </div>
+              {hasImportedWorldCupData ? (
+                <div className="provenance-stats">
+                  <span><b>{customStadiums.filter((stadium) => stadium.dataSource === "map_import").length}</b>地图场馆</span>
+                  <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id).length}</b>周边设施</span>
+                  <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id && facility.routeMinutes !== undefined).length}</b>路网校准</span>
+                  <span><b>{worldCupFacilities.filter((facility) => facility.source === "tianditu").length}</b>天地图补充</span>
+                  <span><b>{worldCupFacilities.filter((facility) => facility.source === "cross_verified").length}</b>双源确认</span>
+                </div>
+              ) : (
+                <div className="provenance-stats">
+                  <span><b>{regionStadiums.length}</b>场馆情景</span>
+                  <span><b>6</b>候选赛区</span>
+                  <span><b>动态</b>组合选址</span>
+                </div>
+              )}
               <button onClick={() => setPanel("import")}>更换赛事区域</button>
             </div>
           )}
