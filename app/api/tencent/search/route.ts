@@ -32,14 +32,19 @@ const housingKeywords = [
 ];
 
 const worldCupKeywords = [
+  "体育场",
   "酒店",
   "地铁站",
   "火车站",
-  "医院",
-  "餐厅",
+  "公交枢纽",
+  "长途汽车站",
+  "机场",
   "停车场",
+  "医院",
+  "急救中心",
+  "餐厅",
+  "商场",
   "公共厕所",
-  "体育场",
 ];
 
 export async function POST(request: NextRequest) {

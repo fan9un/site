@@ -67,6 +67,13 @@ import {
   routeProfileOptions,
   type RouteMatrixProfile,
 } from "./routing-profiles";
+import {
+  isWorldCupStadiumDescription,
+  worldCupAccessibility,
+  worldCupChainForPoi,
+  worldCupChainRadiusKm,
+  worldCupNominalCapacity,
+} from "./worldcup-spatial";
 
 type Mode = "housing" | "worldcup";
 type MetricMap = Record<string, number>;
@@ -217,6 +224,9 @@ type Stadium = {
   name: string;
   city: string;
   capacity: number;
+  coord?: Coord;
+  dataSource?: "demo" | "manual" | "map_import";
+  mapSource?: MapPoiSource;
   metrics: MetricMap;
   limits: {
     交通: number;
@@ -252,7 +262,9 @@ type ManualWorldCupFacility = {
   chain: WorldCupChain;
   capacity: number;
   coord: Coord;
-  source: "manual" | "tencent_poi";
+  source: "manual" | MapPoiSource;
+  routeMinutes?: number;
+  distanceKm?: number;
 };
 
 type Recommendation = {
@@ -1604,7 +1616,8 @@ function optimizeWorldCupPortfolio(
   legacyShare: number,
 ) {
   const candidates = stadiumInterventions.filter((intervention) =>
-    intervention.appliesTo.includes(stadium.id) || stadium.id.startsWith("manual-stadium-"),
+    intervention.appliesTo.includes(stadium.id) ||
+    Boolean(stadium.dataSource && stadium.dataSource !== "demo"),
   );
   let selected: StadiumIntervention[] = [];
   let current = evaluateWorldCupPortfolio(
@@ -2046,43 +2059,178 @@ function manualWorldCupChain(label: string): WorldCupChain | undefined {
 }
 
 function importedWorldCupChain(category = ""): WorldCupChain | undefined {
-  if (/酒店/.test(category)) return "住宿";
-  if (/地铁|火车|停车场/.test(category)) return "交通";
-  if (/医院/.test(category)) return "医疗";
-  if (/餐厅/.test(category)) return "餐饮";
-  if (/公共厕所/.test(category)) return "公卫";
-  return undefined;
+  return worldCupChainForPoi(category);
 }
 
 function importedWorldCupCapacity(category = "") {
-  if (/酒店/.test(category)) return 180;
-  if (/地铁/.test(category)) return 12000;
-  if (/火车/.test(category)) return 16000;
-  if (/停车场/.test(category)) return 2200;
-  if (/医院/.test(category)) return 4500;
-  if (/餐厅/.test(category)) return 350;
-  if (/公共厕所/.test(category)) return 900;
-  return 0;
+  return worldCupNominalCapacity(category);
+}
+
+function worldCupPoiText(point: TencentPoi) {
+  return `${point.category ?? ""}|${point.poiCategory ?? ""}|${point.name ?? ""}`;
+}
+
+function isWorldCupStadiumPoi(point: TencentPoi) {
+  return isWorldCupStadiumDescription(worldCupPoiText(point));
+}
+
+async function requestWorldCupRouteTimes(
+  stadiumPoints: Array<{ id: string; coord: Coord }>,
+  points: TencentPoi[],
+) {
+  const destinations = points
+    .filter((point) => importedWorldCupChain(worldCupPoiText(point)))
+    .slice(0, 60);
+  if (!stadiumPoints.length || !destinations.length) return new Map<string, number>();
+  const response = await fetch("/api/routing/matrix", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      profile: "driving",
+      sources: stadiumPoints.map((stadium) => ({
+        id: stadium.id,
+        ...stadium.coord,
+        coordinateSystem: "gcj02",
+      })),
+      destinations: destinations.map((point, index) => ({
+        id: point.id ?? `worldcup-destination-${index}`,
+        lat: point.lat,
+        lng: point.lng,
+        coordinateSystem: "gcj02",
+      })),
+    }),
+  });
+  const payload = (await response.json()) as {
+    sources?: string[];
+    destinations?: string[];
+    durationsMinutes?: Array<Array<number | null>>;
+  };
+  if (!response.ok || !payload.sources || !payload.destinations || !payload.durationsMinutes) {
+    return new Map<string, number>();
+  }
+  const routeTimes = new Map<string, number>();
+  payload.sources.forEach((stadiumId, sourceIndex) => {
+    payload.destinations!.forEach((destinationId, destinationIndex) => {
+      const minutes = payload.durationsMinutes?.[sourceIndex]?.[destinationIndex];
+      if (typeof minutes === "number") {
+        routeTimes.set(`${stadiumId}::${destinationId}`, minutes);
+      }
+    });
+  });
+  return routeTimes;
 }
 
 function buildImportedWorldCupFacilities(
   points: TencentPoi[],
   stadiumId: string,
+  stadiumCoord: Coord,
+  routeTimes: Map<string, number> = new Map(),
 ): ManualWorldCupFacility[] {
   return points.flatMap((point, index) => {
-    const chain = importedWorldCupChain(point.category);
-    const capacity = importedWorldCupCapacity(point.category);
-    if (!chain || capacity <= 0) return [];
+    if (isWorldCupStadiumPoi(point)) return [];
+    const description = worldCupPoiText(point);
+    const chain = importedWorldCupChain(description);
+    const nominalCapacity = importedWorldCupCapacity(description);
+    if (!chain || nominalCapacity <= 0) return [];
+    const distanceKm = haversine(stadiumCoord, point);
+    if (distanceKm > worldCupChainRadiusKm[chain] * 1.5) return [];
+    const pointId = point.id ?? `worldcup-destination-${index}`;
+    const routeMinutes = routeTimes.get(`${stadiumId}::${pointId}`);
+    const accessibility = worldCupAccessibility(chain, distanceKm, routeMinutes);
+    const sourceConfidence = point.source === "cross_verified"
+      ? 1
+      : point.source === "tianditu"
+        ? 0.9
+        : 0.95;
+    const capacity = Math.round(nominalCapacity * accessibility * sourceConfidence);
+    if (capacity <= 0) return [];
     return [{
-      id: `worldcup-poi-${point.id ?? index}`,
+      id: `worldcup-poi-${stadiumId}-${pointId}`,
       stadiumId,
       name: point.name ?? point.category ?? `赛事设施 ${index + 1}`,
       chain,
       capacity,
       coord: { lat: point.lat, lng: point.lng },
-      source: "tencent_poi" as const,
+      source: point.source ?? "tencent",
+      routeMinutes,
+      distanceKm,
     }];
   });
+}
+
+function buildImportedWorldCupStadiums(
+  region: string,
+  points: TencentPoi[],
+  routeTimes: Map<string, number>,
+) {
+  const stadiumPoints = selectDistributedPois(
+    points.filter(isWorldCupStadiumPoi),
+    6,
+  );
+  const stadiumRows = stadiumPoints.map((point, index) => {
+    const id = `map-stadium-${point.id ?? index}`;
+    const coord = { lat: point.lat, lng: point.lng };
+    const facilities = buildImportedWorldCupFacilities(points, id, coord, routeTimes);
+    const limits: Stadium["limits"] = { 交通: 0, 住宿: 0, 餐饮: 0, 医疗: 0, 公卫: 0 };
+    facilities.forEach((facility) => {
+      limits[facility.chain] += facility.capacity;
+    });
+    const capacity = 40_000;
+    const stadium: Stadium = {
+      id,
+      name: point.name ?? `候选场馆 ${index + 1}`,
+      city: `${region} · 地图识别场馆`,
+      capacity,
+      coord,
+      dataSource: "map_import",
+      mapSource: point.source ?? "tencent",
+      metrics: {
+        transit: Math.min(100, limits.交通 / capacity * 100),
+        lodging: Math.min(100, limits.住宿 / capacity * 100),
+        egress: Math.min(100, limits.交通 / capacity * 85),
+        medical: Math.min(100, limits.医疗 / (capacity * 0.13) * 100),
+        dining: Math.min(100, limits.餐饮 / (capacity * 0.74) * 100),
+        sanitary: Math.min(100, limits.公卫 / (capacity * 0.55) * 100),
+        security: 50,
+        digital: 50,
+        climate: 50,
+        commerce: Math.min(100, limits.餐饮 / (capacity * 0.5) * 100),
+      },
+      limits: { 交通: 0, 住宿: 0, 餐饮: 0, 医疗: 0, 公卫: 0 },
+    };
+    return { stadium, facilities };
+  });
+  return {
+    stadiums: stadiumRows.map((row) => row.stadium),
+    facilities: stadiumRows.flatMap((row) => row.facilities),
+  };
+}
+
+function offsetCoord(center: Coord, northKm: number, eastKm: number): Coord {
+  const latitudeOffset = northKm / 111;
+  const longitudeOffset = eastKm / (111 * Math.max(0.2, Math.cos(center.lat * Math.PI / 180)));
+  return { lat: center.lat + latitudeOffset, lng: center.lng + longitudeOffset };
+}
+
+const worldCupInterventionOffsets: Record<string, [number, number, number]> = {
+  "hotel-cluster": [2.4, 2.1, 3.5],
+  "modular-lodging": [1.6, -1.2, 2.2],
+  "park-ride": [-3.8, -3.1, 6],
+  "medical-hub": [-2.2, 2.4, 4],
+  "fan-zone": [0.4, -1.8, 1.5],
+  "egress-upgrade": [0.3, 0.3, 0.8],
+};
+
+function worldCupInterventionPlace(
+  intervention: StadiumIntervention,
+  stadium: Stadium,
+) {
+  if (stadium.dataSource !== "map_import") return intervention.place;
+  const [northKm, eastKm] = worldCupInterventionOffsets[intervention.id] ?? [1, 1];
+  const northSouth = northKm >= 0 ? "北" : "南";
+  const eastWest = eastKm >= 0 ? "东" : "西";
+  const distanceKm = Math.hypot(northKm, eastKm);
+  return `${stadium.name}${northSouth}${eastWest}方向约 ${distanceKm.toFixed(1)}km · 待法定控规地块核验`;
 }
 
 export default function Home() {
@@ -2092,6 +2240,7 @@ export default function Home() {
   const [routeProfile, setRouteProfile] = useState<RouteMatrixProfile>("driving");
   const [activeHousingId, setActiveHousingId] = useState("");
   const [activeRecommendationId, setActiveRecommendationId] = useState("");
+  const [activeCupInterventionId, setActiveCupInterventionId] = useState("");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
   const [budget, setBudget] = useState(3.2);
@@ -2267,6 +2416,8 @@ export default function Home() {
     });
     return { ...base, limits };
   }, [activeStadiumId, availableStadiums, worldCupFacilities]);
+  const hasWorldCupSpatialData = Boolean(activeStadium.coord);
+  const hasImportedWorldCupData = activeStadium.dataSource === "map_import";
   const lifecycleSummary = useMemo(() => {
     const facilities = analysisScenario.facilities;
     return {
@@ -2530,7 +2681,7 @@ export default function Home() {
         rank: index + 1,
         type: intervention.type,
         title: intervention.title,
-        place: intervention.place,
+        place: worldCupInterventionPlace(intervention, activeStadium),
         impact: `有效承载 +${formatNumber(attendanceGain)} 人`,
         detail: `成本 ${intervention.cost.toFixed(2)} 亿元；赛后复用率 ${(intervention.reuseRate * 100).toFixed(0)}%，闲置风险 CVaR ${idleLoss.toFixed(2)} 亿元；主要补充${mainGain[0]} ${formatNumber(mainGain[1] ?? 0)}。`,
         score: Math.round(
@@ -2540,6 +2691,7 @@ export default function Home() {
         ),
         scoreLabel: "复用稳健度",
         tone: (["lime", "blue", "coral"] as const)[index],
+        sourceId: intervention.id,
       };
     });
   }, [
@@ -2547,6 +2699,61 @@ export default function Home() {
     cupOptimization,
     fairnessWeight,
     matchScenario,
+  ]);
+
+  const resolvedActiveCupInterventionId = cupOptimization.selected.some(
+    (intervention) => intervention.id === activeCupInterventionId,
+  )
+    ? activeCupInterventionId
+    : cupOptimization.selected[0]?.id ?? "";
+
+  const worldCupMapPoints = useMemo<PlanningMapPoint[]>(() => {
+    if (!activeStadium.coord) return [];
+    const stadiumPoints: PlanningMapPoint[] = availableStadiums
+      .filter((stadium) => stadium.coord)
+      .map((stadium) => ({
+        id: stadium.id,
+        name: stadium.name,
+        lat: stadium.coord!.lat,
+        lng: stadium.coord!.lng,
+        kind: "zone" as const,
+        score: stadium.id === activeStadium.id ? stadiumScore : undefined,
+        source: stadium.mapSource ?? "model",
+      }));
+    const facilityPoints: PlanningMapPoint[] = worldCupFacilities
+      .filter((facility) => facility.stadiumId === activeStadium.id)
+      .map((facility) => ({
+        id: facility.id,
+        name: `${facility.chain} · ${facility.name}`,
+        lat: facility.coord.lat,
+        lng: facility.coord.lng,
+        kind: "imported" as const,
+        source: facility.source === "manual" ? "model" : facility.source,
+      }));
+    const recommendationPoints: PlanningMapPoint[] = cupOptimization.selected.map(
+      (intervention, index) => {
+        const [northKm, eastKm, serviceRadiusKm] =
+          worldCupInterventionOffsets[intervention.id] ?? [1 + index, 1 - index, 2];
+        const coord = offsetCoord(activeStadium.coord!, northKm, eastKm);
+        return {
+          id: intervention.id,
+          name: `${intervention.type}候选方向`,
+          lat: coord.lat,
+          lng: coord.lng,
+          kind: "recommendation" as const,
+          rank: index + 1,
+          serviceRadiusKm,
+          source: "model" as const,
+        };
+      },
+    );
+    return [...stadiumPoints, ...facilityPoints, ...recommendationPoints];
+  }, [
+    activeStadium,
+    availableStadiums,
+    cupOptimization.selected,
+    stadiumScore,
+    worldCupFacilities,
   ]);
 
   const factors = mode === "housing" ? housingFactors : cupFactors;
@@ -2573,7 +2780,9 @@ export default function Home() {
       ? !hasHousingData || analysisScenario.isImported
         ? []
         : housingMarkers.filter((marker) => marker.ring === currentScale.ring)
-      : cupMarkers;
+      : hasWorldCupSpatialData
+        ? []
+        : cupMarkers;
 
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
@@ -2898,10 +3107,15 @@ export default function Home() {
       let fusedPoints = validPoints;
       let fusionNote = "天地图增强暂不可用，本次仍使用腾讯位置服务完成分析。";
       try {
-        const center = {
-          lat: validPoints.reduce((sum, point) => sum + point.lat, 0) / validPoints.length,
-          lng: validPoints.reduce((sum, point) => sum + point.lng, 0) / validPoints.length,
-        };
+        const stadiumCenter = mode === "worldcup"
+          ? validPoints.find(isWorldCupStadiumPoi)
+          : undefined;
+        const center = stadiumCenter
+          ? { lat: stadiumCenter.lat, lng: stadiumCenter.lng }
+          : {
+              lat: validPoints.reduce((sum, point) => sum + point.lat, 0) / validPoints.length,
+              lng: validPoints.reduce((sum, point) => sum + point.lng, 0) / validPoints.length,
+            };
         const tdtResponse = await fetch("/api/tianditu/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2923,28 +3137,53 @@ export default function Home() {
         // 天地图是增强源；失败时不阻断腾讯底图与主分析流程。
       }
       if (mode === "worldcup") {
-        const importedFacilities = buildImportedWorldCupFacilities(
-          fusedPoints,
-          activeStadium.id,
-        );
-        if (!importedFacilities.length) {
-          throw new Error("未检索到可转换为赛事承载能力的酒店、交通、医疗、餐饮或公卫设施。");
+        const stadiumSeeds = selectDistributedPois(
+          fusedPoints.filter(isWorldCupStadiumPoi),
+          6,
+        ).map((point, index) => ({
+          id: `map-stadium-${point.id ?? index}`,
+          coord: { lat: point.lat, lng: point.lng },
+        }));
+        if (!stadiumSeeds.length) {
+          throw new Error("当前区域没有检索到可识别的体育场、足球场或体育中心，请扩大区域或手动建立场馆。");
         }
-        setWorldCupFacilities((items) => [
-          ...items.filter(
-            (item) =>
-              item.source !== "tencent_poi" || item.stadiumId !== activeStadium.id,
-          ),
-          ...importedFacilities,
+        setPipelineStatus("地图场馆已识别，正在计算场馆到赛事设施的 OSRM 行车时间…");
+        let routeTimes = new Map<string, number>();
+        try {
+          routeTimes = await requestWorldCupRouteTimes(stadiumSeeds, fusedPoints);
+        } catch {
+          // 路网服务失败时保留球面距离衰减，并在来源说明中明确回退。
+        }
+        const imported = buildImportedWorldCupStadiums(
+          resolvedRegion,
+          fusedPoints,
+          routeTimes,
+        );
+        if (!imported.facilities.length) {
+          throw new Error("已找到场馆，但周边没有检索到可转换为承载能力的酒店、交通、医疗、餐饮或公卫设施。");
+        }
+        setCustomStadiums((items) => [
+          ...items.filter((stadium) => stadium.dataSource !== "map_import"),
+          ...imported.stadiums,
         ]);
+        setWorldCupFacilities(imported.facilities);
+        setActiveStadiumId(imported.stadiums[0].id);
+        setActiveCupInterventionId("");
         setWorldCupRegion(resolvedRegion);
-        setManualLat(String(validPoints[0].lat));
-        setManualLng(String(validPoints[0].lng));
+        setManualLat(String(imported.stadiums[0].coord!.lat));
+        setManualLng(String(imported.stadiums[0].coord!.lng));
         setWorldCupDataNote(
-          `融合地图已为 ${activeStadium.name} 导入 ${importedFacilities.length} 个赛事设施；${fusionNote} 容量为可编辑代理值。`,
+          `融合地图识别 ${imported.stadiums.length} 座场馆和 ${imported.facilities.length} 组场馆—设施可达关系；${fusionNote} ${routeTimes.size ? "已优先使用 OSRM 行车时间" : "OSRM 暂不可用，已回退球面距离衰减"}，名义场馆容量暂按 4 万人代理。`,
+        );
+        setMapView("real");
+        setMapScale("local");
+        setImportStatus("done");
+        setPanel("none");
+        setPipelineStatus(
+          `赛事数据链已建立：${imported.stadiums.length} 座场馆、${imported.facilities.length} 组服务关系，路网可用点 ${routeTimes.size} 个。`,
         );
         showToast(
-          `已从${resolvedRegion}导入 ${importedFacilities.length} 个赛事设施并重算承载力`,
+          `已从${resolvedRegion}导入 ${imported.stadiums.length} 座场馆并重算赛事承载力`,
         );
       } else {
         const nextScenario = buildImportedScenario(resolvedRegion, fusedPoints);
@@ -3012,6 +3251,18 @@ export default function Home() {
       setMapView("real");
     }
     showToast(`已定位方案：${candidate.facility} · ${candidate.parcelName}`);
+  }
+
+  function activateCupIntervention(interventionId: string, openRealMap = false) {
+    const intervention = cupOptimization.selected.find((item) => item.id === interventionId);
+    if (!intervention) return;
+    setActiveCupInterventionId(interventionId);
+    if (openRealMap && hasWorldCupSpatialData) {
+      setMapScale("local");
+      setMapView("real");
+    }
+    const recommendation = cupRecommendations.find((item) => item.sourceId === interventionId);
+    showToast(`已定位赛事方案：${intervention.type} · ${recommendation?.place ?? intervention.place}`);
   }
 
   function handleManualAdd(event: FormEvent) {
@@ -3117,6 +3368,8 @@ export default function Home() {
         name,
         city: `${worldCupRegion} · 手动候选场馆`,
         capacity,
+        coord,
+        dataSource: "manual",
         metrics: {
           transit: 50,
           lodging: 45,
@@ -3234,12 +3487,16 @@ export default function Home() {
 
         <div className="top-actions">
           <button className="connection-pill" onClick={() => setPanel("import")}>
-            <span className={importStatus === "done" ? "status-dot live" : "status-dot"} />
+            <span className={
+              (mode === "housing" ? hasHousingData : hasImportedWorldCupData)
+                ? "status-dot live"
+                : "status-dot"
+            } />
             {mode === "housing"
               ? hasHousingData
                 ? "区域数据已连接"
                 : "选择分析区域"
-              : importStatus === "done"
+              : hasImportedWorldCupData
                 ? "赛事数据已连接"
                 : "导入赛事数据"}
           </button>
@@ -3378,6 +3635,24 @@ export default function Home() {
             </div>
           ))}
 
+          {mode === "worldcup" && hasImportedWorldCupData && (
+            <div className="data-provenance proxy">
+              <div>
+                <b>{worldCupRegion}</b>
+                <span>融合地图赛事场景</span>
+              </div>
+              <p>{worldCupDataNote}</p>
+              <div className="provenance-stats">
+                <span><b>{customStadiums.filter((stadium) => stadium.dataSource === "map_import").length}</b>地图场馆</span>
+                <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id).length}</b>周边设施</span>
+                <span><b>{worldCupFacilities.filter((facility) => facility.stadiumId === activeStadium.id && facility.routeMinutes !== undefined).length}</b>路网校准</span>
+                <span><b>{worldCupFacilities.filter((facility) => facility.source === "tianditu").length}</b>天地图补充</span>
+                <span><b>{worldCupFacilities.filter((facility) => facility.source === "cross_verified").length}</b>双源确认</span>
+              </div>
+              <button onClick={() => setPanel("import")}>更换赛事区域</button>
+            </div>
+          )}
+
           {(mode !== "housing" || hasHousingData) && <div className="factor-heading">
             <span>评估变量</span>
             <button onClick={() => setFactorView(factorView === "core" ? "all" : "core")}>
@@ -3473,16 +3748,27 @@ export default function Home() {
                 {mode === "housing" ? scaleLocation : worldCupRegion}
               </span>
               <h1>
-                {mode === "housing" ? scaleTitle : "赛事设施承载力沙盘"}
+                {mode === "housing"
+                  ? scaleTitle
+                  : mapView === "real" && hasWorldCupSpatialData
+                    ? "赛事设施承载力实景"
+                    : "赛事设施承载力沙盘"}
               </h1>
             </div>
             <div className="map-actions">
               <button
-                disabled={mode === "housing" && !hasHousingData}
-                onClick={() => showToast("已聚焦全部分析对象")}
+                disabled={
+                  (mode === "housing" && !hasHousingData) ||
+                  (mode === "worldcup" && !hasWorldCupSpatialData)
+                }
+                onClick={() => {
+                  setMapScale("city");
+                  showToast("已切换到城市尺度查看全部分析对象");
+                }}
               >⌖ 全域</button>
               <button onClick={() => setPanel("import")}>⇩ 导入数据</button>
-              {mode === "housing" && hasHousingData && (
+              {((mode === "housing" && hasHousingData) ||
+                (mode === "worldcup" && hasWorldCupSpatialData)) && (
                 <button
                   className={mapView === "real" ? "active" : ""}
                   onClick={() =>
@@ -3497,7 +3783,11 @@ export default function Home() {
 
           <div
             className={`map-canvas ${mode} zoom-${mapScale} ${
-              mode === "housing" && mapView === "real" ? "real-map" : ""
+              mapView === "real" &&
+              ((mode === "housing" && hasHousingData) ||
+                (mode === "worldcup" && hasWorldCupSpatialData))
+                ? "real-map"
+                : ""
             }`}
           >
             {mode === "housing" && hasHousingData && mapView === "real" && (
@@ -3512,6 +3802,24 @@ export default function Home() {
                 onRecommendationSelect={(recommendationId) =>
                   activateRecommendation(recommendationId)
                 }
+                captionTitle="真实路网与跨源公共设施"
+                captionDetail="腾讯矢量底图 · 天地图补充与交叉确认"
+              />
+            )}
+            {mode === "worldcup" && hasWorldCupSpatialData && mapView === "real" && activeStadium.coord && (
+              <TencentPlanningMap
+                apiKey={tencentMapKey}
+                scale={mapScale}
+                center={activeStadium.coord}
+                points={worldCupMapPoints}
+                activeZoneId={activeStadiumId}
+                activeRecommendationId={resolvedActiveCupInterventionId}
+                onZoneSelect={setActiveStadiumId}
+                onRecommendationSelect={(interventionId) =>
+                  activateCupIntervention(interventionId)
+                }
+                captionTitle="世界杯场馆与赛事设施实景"
+                captionDetail="场馆、酒店、交通、医疗、餐饮与公卫承载点"
               />
             )}
             {mode === "housing" && hasHousingData && mapView === "real" && analysisScenario.isImported && (
@@ -3526,6 +3834,20 @@ export default function Home() {
                 <span>组合建议已上图</span>
                 <b>{housingOptimization.selected.length} 处</b>
                 <small>编号与右侧卡片一致 · 圆圈为设施服务半径</small>
+              </div>
+            )}
+            {mode === "worldcup" && hasWorldCupSpatialData && mapView === "real" && cupOptimization.selected.length > 0 && (
+              <div className="optimization-map-status">
+                <span>赛事组合建议已上图</span>
+                <b>{cupOptimization.selected.length} 处</b>
+                <small>编号与右侧卡片一致 · 方向点需结合控规地块进一步核验</small>
+              </div>
+            )}
+            {mode === "worldcup" && hasImportedWorldCupData && mapView === "real" && (
+              <div className="map-source-legend" aria-label="世界杯融合数据来源图例">
+                <span><i className="source-tencent" />腾讯位置</span>
+                <span><i className="source-tianditu" />天地图补充</span>
+                <span><i className="source-verified" />双源确认</span>
               </div>
             )}
             {mode === "housing" && !hasHousingData && (
@@ -3627,6 +3949,31 @@ export default function Home() {
               </>
             )}
 
+            {mode === "worldcup" && hasWorldCupSpatialData && mapView === "real" && (
+              <div className="zoom-control" aria-label="赛事地图缩放">
+                <button
+                  aria-label="放大赛事地图"
+                  disabled={mapScale === "local"}
+                  onClick={() => setMapScale(mapScale === "region" ? "city" : "local")}
+                >+</button>
+                <div>
+                  {(["local", "city", "region"] as const).map((scale) => (
+                    <button
+                      key={scale}
+                      className={mapScale === scale ? "active" : ""}
+                      aria-label={`切换到${mapScales[scale].label}`}
+                      onClick={() => setMapScale(scale)}
+                    />
+                  ))}
+                </div>
+                <button
+                  aria-label="缩小赛事地图"
+                  disabled={mapScale === "region"}
+                  onClick={() => setMapScale(mapScale === "local" ? "city" : "region")}
+                >−</button>
+              </div>
+            )}
+
             {mode === "housing" ? (hasHousingData ? (
               mapScale === "local" ? (
                 <>
@@ -3664,7 +4011,7 @@ export default function Home() {
                   <i className="region-link link-c" />
                 </div>
               )) : null
-            ) : (
+            ) : mapView === "real" && hasWorldCupSpatialData ? null : (
               <div className="stadium-ring" aria-label="场馆服务范围">
                 <span className="ring-label">5km 服务圈</span>
                 <button className="stadium-core" onClick={() => showToast(`${activeStadium.name}已设为当前评估场馆`)}>
@@ -3691,7 +4038,7 @@ export default function Home() {
               </button>
             ))}
 
-            {mode === "worldcup" && worldCupFacilities
+            {mode === "worldcup" && (!hasWorldCupSpatialData || mapView === "schematic") && worldCupFacilities
               .filter((facility) => facility.stadiumId === activeStadium.id)
               .slice(0, 8)
               .map((facility, index) => (
@@ -3771,6 +4118,13 @@ export default function Home() {
                     <span><i className="legend-proposed" />组合建议</span>
                   </>
                 )
+              ) : mapView === "real" && hasWorldCupSpatialData ? (
+                <>
+                  <span><i className="legend-node real-zone" />场馆与准备度</span>
+                  <span><i className="legend-node real-facility" />赛事设施 / POI</span>
+                  <span><i className="legend-proposed" />动态干预方向（待控规核验）</span>
+                  <span><i className="legend-line road" />真实路网可达</span>
+                </>
               ) : (
                 <>
                   <span><i className="legend-high" />高承载</span>
@@ -4004,7 +4358,11 @@ export default function Home() {
             {recommendations.map((item) => (
               <article
                 className={`recommendation-card ${
-                  item.sourceId === resolvedActiveRecommendationId ? "map-active" : ""
+                  item.sourceId === (mode === "housing"
+                    ? resolvedActiveRecommendationId
+                    : resolvedActiveCupInterventionId)
+                    ? "map-active"
+                    : ""
                 }`}
                 key={item.rank}
               >
@@ -4018,10 +4376,12 @@ export default function Home() {
                     <strong>{item.impact}</strong>
                     <span>{item.scoreLabel ?? "方案稳健度"} {item.score}%</span>
                   </div>
-                  {mode === "housing" && item.sourceId && (
+                  {item.sourceId && (mode === "housing" || hasWorldCupSpatialData) && (
                     <button
                       className="map-locate"
-                      onClick={() => activateRecommendation(item.sourceId!, true)}
+                      onClick={() => mode === "housing"
+                        ? activateRecommendation(item.sourceId!, true)
+                        : activateCupIntervention(item.sourceId!, true)}
                     >
                       <MapPinned size={12} />
                       在地图定位方案 0{item.rank}
@@ -4112,9 +4472,11 @@ export default function Home() {
             {panel === "import" && (
               <>
                 <span className="modal-kicker">DATA CONNECTOR</span>
-                <h2>建立可审计的真实数据链</h2>
+                <h2>{mode === "housing" ? "建立可审计的真实数据链" : "建立世界杯赛事空间数据链"}</h2>
                 <p className="modal-lead">
-                  地图 POI 负责发现位置，OSRM 负责行车时间；企业清单校准岗位和行业，成交记录只用于评分后的享乐价格审计，法定控规面替换代理候选网格。每一层都保留来源等级，不把代理值冒充法定或统计数据。
+                  {mode === "housing"
+                    ? "地图 POI 负责发现位置，OSRM 负责行车时间；企业清单校准岗位和行业，成交记录只用于评分后的享乐价格审计，法定控规面替换代理候选网格。每一层都保留来源等级，不把代理值冒充法定或统计数据。"
+                    : "腾讯地图检索场馆与赛事设施，天地图补充并交叉确认公共设施，OSRM 计算场馆到酒店、交通、医疗、餐饮和公卫节点的行车时间。容量缺少官方数据时会明确标记为代理值。"}
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -4136,18 +4498,30 @@ export default function Home() {
                     />
                   </label>
                   <div className="import-pipeline">
-                    <span><b>01</b> POI 分类检索</span>
+                    <span><b>01</b> {mode === "housing" ? "POI 分类检索" : "场馆与设施识别"}</span>
                     <i>→</i>
-                    <span><b>02</b> 多方式路网矩阵</span>
+                    <span><b>02</b> {mode === "housing" ? "多方式路网矩阵" : "腾讯 × 天地图融合"}</span>
                     <i>→</i>
-                    <span><b>03</b> 容量品质校准</span>
+                    <span><b>03</b> {mode === "housing" ? "容量品质校准" : "OSRM 承载力折损"}</span>
                   </div>
                   <button className="modal-submit" disabled={importStatus === "loading"}>
                     {importStatus === "loading"
                       ? "正在建立空间索引…"
-                      : "导入腾讯 POI 并建立 OSRM 矩阵"}
+                      : mode === "housing"
+                        ? "导入腾讯 POI 并建立 OSRM 矩阵"
+                        : "导入场馆与赛事设施并计算承载力"}
                   </button>
                 </form>
+                {mode === "worldcup" && (
+                  <section className="qcc-connector" aria-label="世界杯空间数据范围">
+                    <div>
+                      <span>EVENT SPATIAL CHAIN</span>
+                      <b>共享住房版地图与路网能力</b>
+                      <p>检索体育场、酒店、地铁、铁路、公交枢纽、机场、停车场、医院、急救、餐饮、商业和公共厕所；同一设施可按实际可达性服务多座场馆。</p>
+                    </div>
+                  </section>
+                )}
+                {mode === "housing" && <>
                 <section className="qcc-connector" aria-label="企查查就业校准">
                   <div>
                     <span>QCC COMPANY MCP</span>
@@ -4204,6 +4578,7 @@ export default function Home() {
                     <a className="template-link" href="/templates/legal-parcels-template.geojson" download>下载字段模板（需填批准文号）</a>
                   </article>
                 </div>
+                </>}
                 <div className="source-catalog">
                   <b>可接入的权威来源</b>
                   <a href="https://project-osrm.org/docs/v26.4.0/api/#table-service" target="_blank" rel="noreferrer">OSRM 路网矩阵文档 ↗</a>
@@ -4215,7 +4590,7 @@ export default function Home() {
                 </div>
                 {importErrorMessage && <div className="form-error">{importErrorMessage}</div>}
                 {pipelineStatus && <div className="pipeline-status">{pipelineStatus}</div>}
-                <section className="route-matrix-control" aria-label="岗位可达出行方式">
+                {mode === "housing" && <section className="route-matrix-control" aria-label="岗位可达出行方式">
                   <div>
                     <b>岗位可达路网方式</b>
                     <span>驾车默认走 OSRM；步行/骑行按需消耗 ORS 矩阵额度。结果仅替换岗位可达阻抗，不把不同方式混成一个分数。</span>
@@ -4236,8 +4611,8 @@ export default function Home() {
                   <button className="modal-secondary" type="button" onClick={() => void refreshRouteMatrix()}>
                     按所选方式刷新路网矩阵
                   </button>
-                </section>
-                {hasHousingData && (
+                </section>}
+                {mode === "housing" && hasHousingData && (
                   <button className="modal-secondary" type="button" onClick={clearAnalysisScenario}>
                     清空当前分析并选择新区
                   </button>

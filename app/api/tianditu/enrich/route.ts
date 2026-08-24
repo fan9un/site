@@ -12,7 +12,19 @@ const housingKeywords = [
   "政务服务中心",
 ];
 
-const worldCupKeywords = ["酒店", "医院", "火车站", "体育场", "停车场"];
+const worldCupKeywords = [
+  "体育场",
+  "酒店",
+  "地铁站",
+  "火车站",
+  "公交枢纽",
+  "医院",
+  "急救中心",
+  "餐厅",
+  "商场",
+  "公共厕所",
+  "停车场",
+];
 
 type CacheEntry = { expiresAt: number; payload: unknown };
 const cache = new Map<string, CacheEntry>();

@@ -92,6 +92,8 @@ export default function TencentPlanningMap({
   activeRecommendationId,
   onZoneSelect,
   onRecommendationSelect,
+  captionTitle = "真实空间数据",
+  captionDetail = "道路、行政地名与公共设施点位",
 }: {
   apiKey: string;
   scale: MapScale;
@@ -101,6 +103,8 @@ export default function TencentPlanningMap({
   activeRecommendationId: string;
   onZoneSelect: (zoneId: string) => void;
   onRecommendationSelect: (recommendationId: string) => void;
+  captionTitle?: string;
+  captionDetail?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<TencentMapInstance | null>(null);
@@ -412,8 +416,8 @@ export default function TencentPlanningMap({
         </div>
       )}
       <div className="real-map-caption">
-        <b>腾讯底图 × 天地图权威增强</b>
-        <span>道路/海岸线 · 行政地名 · 跨源公共设施核验</span>
+        <b>{captionTitle}</b>
+        <span>{captionDetail}</span>
       </div>
     </div>
   );
