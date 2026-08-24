@@ -722,7 +722,7 @@ const worldCupRegionOptions: Array<{
   label: string;
   importRegion: string;
   note: string;
-  venues: Array<{ id: string; name: string; city: string }>;
+  venues: Array<{ id: string; name: string; city: string; coord: Coord }>;
 }> = [
   {
     key: "jingjinji",
@@ -730,9 +730,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "北京市",
     note: "检验超大城市轨道分流、跨城接驳与住宿共享能力",
     venues: [
-      { id: "capital", name: "北京主赛场模板", city: "北京 · 既有主场" },
-      { id: "harbor", name: "天津滨海场馆模板", city: "天津 · 改扩建" },
-      { id: "xiongan", name: "雄安新城场馆模板", city: "雄安 · 新建候选" },
+      { id: "capital", name: "北京主赛场模板", city: "北京 · 既有主场", coord: { lat: 39.9929, lng: 116.3965 } },
+      { id: "harbor", name: "天津滨海场馆模板", city: "天津 · 改扩建", coord: { lat: 39.0036, lng: 117.7108 } },
+      { id: "xiongan", name: "雄安新城场馆模板", city: "雄安 · 新建候选", coord: { lat: 38.9945, lng: 115.8926 } },
     ],
   },
   {
@@ -741,9 +741,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "上海市",
     note: "检验高密度多中心城市群的高铁分流与跨城住宿调度",
     venues: [
-      { id: "shanghai", name: "上海主赛场模板", city: "上海 · 既有主场" },
-      { id: "hangzhou", name: "杭州奥体场馆模板", city: "杭州 · 改扩建" },
-      { id: "nanjing", name: "南京新城场馆模板", city: "南京 · 新建候选" },
+      { id: "shanghai", name: "上海主赛场模板", city: "上海 · 既有主场", coord: { lat: 31.1832, lng: 121.4803 } },
+      { id: "hangzhou", name: "杭州奥体场馆模板", city: "杭州 · 改扩建", coord: { lat: 30.2298, lng: 120.2195 } },
+      { id: "nanjing", name: "南京新城场馆模板", city: "南京 · 新建候选", coord: { lat: 32.0047, lng: 118.7342 } },
     ],
   },
   {
@@ -752,9 +752,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "广州市",
     note: "检验跨江通道、机场群、口岸客流与高峰住宿供给",
     venues: [
-      { id: "guangzhou", name: "广州主赛场模板", city: "广州 · 既有主场" },
-      { id: "shenzhen", name: "深圳湾场馆模板", city: "深圳 · 改扩建" },
-      { id: "zhuhai", name: "珠海新城场馆模板", city: "珠海 · 新建候选" },
+      { id: "guangzhou", name: "广州主赛场模板", city: "广州 · 既有主场", coord: { lat: 23.1377, lng: 113.3221 } },
+      { id: "shenzhen", name: "深圳湾场馆模板", city: "深圳 · 改扩建", coord: { lat: 22.5186, lng: 113.9585 } },
+      { id: "zhuhai", name: "珠海新城场馆模板", city: "珠海 · 新建候选", coord: { lat: 22.271, lng: 113.5767 } },
     ],
   },
   {
@@ -763,9 +763,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "成都市",
     note: "检验双核都市圈的城际交通、山地疏散与赛后复用",
     venues: [
-      { id: "chengdu", name: "成都主赛场模板", city: "成都 · 既有主场" },
-      { id: "chongqing", name: "重庆场馆模板", city: "重庆 · 改扩建" },
-      { id: "tianfu", name: "天府新城场馆模板", city: "天府新区 · 新建候选" },
+      { id: "chengdu", name: "成都主赛场模板", city: "成都 · 既有主场", coord: { lat: 30.6765, lng: 104.0726 } },
+      { id: "chongqing", name: "重庆场馆模板", city: "重庆 · 改扩建", coord: { lat: 29.7189, lng: 106.6402 } },
+      { id: "tianfu", name: "天府新城场馆模板", city: "天府新区 · 新建候选", coord: { lat: 30.4098, lng: 104.0668 } },
     ],
   },
   {
@@ -774,9 +774,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "武汉市",
     note: "检验武汉、长沙、南昌之间的高铁协同与区域客流承接",
     venues: [
-      { id: "wuhan", name: "武汉主赛场模板", city: "武汉 · 既有主场" },
-      { id: "changsha", name: "长沙场馆模板", city: "长沙 · 改扩建" },
-      { id: "nanchang", name: "南昌新城场馆模板", city: "南昌 · 新建候选" },
+      { id: "wuhan", name: "武汉主赛场模板", city: "武汉 · 既有主场", coord: { lat: 30.5048, lng: 114.1671 } },
+      { id: "changsha", name: "长沙场馆模板", city: "长沙 · 改扩建", coord: { lat: 28.1837, lng: 112.9792 } },
+      { id: "nanchang", name: "南昌新城场馆模板", city: "南昌 · 新建候选", coord: { lat: 28.682, lng: 115.8582 } },
     ],
   },
   {
@@ -785,9 +785,9 @@ const worldCupRegionOptions: Array<{
     importRegion: "济南市",
     note: "检验济青双核、沿海旅游住宿与跨城赛事运输能力",
     venues: [
-      { id: "jinan", name: "济南主赛场模板", city: "济南 · 既有主场" },
-      { id: "qingdao", name: "青岛场馆模板", city: "青岛 · 改扩建" },
-      { id: "yantai", name: "烟台滨海场馆模板", city: "烟台 · 新建候选" },
+      { id: "jinan", name: "济南主赛场模板", city: "济南 · 既有主场", coord: { lat: 36.6564, lng: 117.1205 } },
+      { id: "qingdao", name: "青岛场馆模板", city: "青岛 · 改扩建", coord: { lat: 36.3177, lng: 120.4056 } },
+      { id: "yantai", name: "烟台滨海场馆模板", city: "烟台 · 新建候选", coord: { lat: 37.4638, lng: 121.4479 } },
     ],
   },
 ];
@@ -801,6 +801,7 @@ function buildWorldCupRegionStadiums(regionKey: WorldCupDemoRegionKey) {
       id: `${region.key}-${venue.id}`,
       name: venue.name,
       city: venue.city,
+      coord: venue.coord,
       dataSource: "demo",
       regionKey: region.key,
       metrics: { ...profile.metrics },
@@ -2916,7 +2917,7 @@ export default function Home() {
     );
     setActiveStadiumId(nextStadiums[0].id);
     setActiveCupInterventionId("");
-    setMapView("schematic");
+    setMapView("real");
     setMapScale("local");
     setImportRegion(region.importRegion);
     showToast(`已切换到${region.label}，评估与组合选址已重新计算`);
@@ -2927,7 +2928,8 @@ export default function Home() {
     setFactorView(nextMode === "housing" ? "all" : "core");
     setManualType(nextMode === "housing" ? "社区卫生服务中心" : "赛事旅馆");
     setManualCapacity(nextMode === "housing" ? "1200" : "1000");
-    if (nextMode === "housing") setMapScale("local");
+    setMapView("real");
+    setMapScale("local");
     setToast("");
   }
 
@@ -3172,20 +3174,28 @@ export default function Home() {
 
   async function handleTencentImport(event: FormEvent) {
     event.preventDefault();
+    const requestedRegion = importRegion.trim();
+    if (!requestedRegion) {
+      setImportStatus("error");
+      setImportErrorMessage("请先填写分析区域，例如“北京市海淀区”或“厦门市湖里区”。");
+      return;
+    }
     setImportStatus("loading");
     setImportErrorMessage("");
+    setPipelineStatus("正在向地图服务检索分类 POI；首次导入通常需要 10–30 秒，请保持窗口打开。");
     try {
       const response = await fetch("/api/tencent/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           key: importKey.trim(),
-          region: importRegion.trim(),
+          region: requestedRegion,
           mode,
         }),
       });
-      if (!response.ok) throw new Error("import failed");
       const result = (await response.json()) as {
+        error?: string;
+        errorCode?: string;
         region?: string;
         count?: number;
         categories?: Array<{ name?: string; count?: number; error?: string }>;
@@ -3199,6 +3209,14 @@ export default function Home() {
           lng?: number;
         }>;
       };
+      if (!response.ok) {
+        throw new Error(
+          result.error ??
+            (result.errorCode === "upstream-network"
+              ? "本地服务无法连接腾讯地图，请检查网络或重新启动本地开发服务。"
+              : "地图服务请求失败，请检查 Key、白名单或配额。"),
+        );
+      }
       const categoryRows = result.categories ?? [];
       const failedRows = categoryRows.filter((row) => Boolean(row.error));
       const failedShare = categoryRows.length
@@ -3359,6 +3377,7 @@ export default function Home() {
       setPanel("none");
     } catch (error) {
       setImportStatus("error");
+      setPipelineStatus("");
       setImportErrorMessage(
         error instanceof Error
           ? error.message
@@ -3917,9 +3936,7 @@ export default function Home() {
               <h1>
                 {mode === "housing"
                   ? scaleTitle
-                  : mapView === "real" && hasWorldCupSpatialData
-                    ? "赛事设施承载力实景"
-                    : "赛事设施承载力沙盘"}
+                  : "赛事设施承载力地图"}
               </h1>
             </div>
             <div className="map-actions">
@@ -3929,13 +3946,12 @@ export default function Home() {
                   (mode === "worldcup" && !hasWorldCupSpatialData)
                 }
                 onClick={() => {
-                  setMapScale("city");
-                  showToast("已切换到城市尺度查看全部分析对象");
+                  setMapScale(mode === "worldcup" ? "region" : "city");
+                  showToast(mode === "worldcup" ? "已缩放到联合赛区全域" : "已切换到城市尺度查看全部分析对象");
                 }}
               >⌖ 全域</button>
               <button onClick={() => setPanel("import")}>⇩ 导入数据</button>
-              {((mode === "housing" && hasHousingData) ||
-                (mode === "worldcup" && hasWorldCupSpatialData)) && (
+              {mode === "housing" && hasHousingData && (
                 <button
                   className={mapView === "real" ? "active" : ""}
                   onClick={() =>
@@ -3986,7 +4002,9 @@ export default function Home() {
                   activateCupIntervention(interventionId)
                 }
                 captionTitle="世界杯场馆与赛事设施实景"
-                captionDetail="场馆、酒店、交通、医疗、餐饮与公卫承载点"
+                captionDetail={hasImportedWorldCupData
+                  ? "腾讯 × 天地图设施点 · OSRM 路网可达"
+                  : "真实底图上的赛区试算坐标 · 场馆落点不代表法定规划"}
               />
             )}
             {mode === "housing" && hasHousingData && mapView === "real" && analysisScenario.isImported && (
@@ -4673,11 +4691,20 @@ export default function Home() {
                   </div>
                   <button className="modal-submit" disabled={importStatus === "loading"}>
                     {importStatus === "loading"
-                      ? "正在建立空间索引…"
+                      ? "正在检索 POI（通常需 10–30 秒）…"
                       : mode === "housing"
                         ? "导入腾讯 POI 并建立 OSRM 矩阵"
                         : "导入场馆与赛事设施并计算承载力"}
                   </button>
+                  {importStatus === "loading" && (
+                    <div className="import-live-status" role="status" aria-live="polite">
+                      <span className="status-spinner" />
+                      <span>
+                        <b>地图服务正在响应</b>
+                        <small>完成分类 POI 后会继续建立路网矩阵，请不要重复点击。</small>
+                      </span>
+                    </div>
+                  )}
                 </form>
                 {mode === "worldcup" && (
                   <section className="qcc-connector" aria-label="世界杯空间数据范围">

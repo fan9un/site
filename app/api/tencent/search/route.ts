@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
         try {
           response = await fetch(url, {
             headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(12_000),
           });
         } catch {
           lastError = "network";
@@ -172,6 +173,28 @@ export async function POST(request: NextRequest) {
     });
   });
   const points = Array.from(pointIndex.values());
+  const successfulCategories = results.filter((result) => !result.error).length;
+  if (!successfulCategories) {
+    const errors = results.map((result) => result.error).filter(Boolean);
+    const networkOnly = errors.length > 0 && errors.every((error) => error === "network");
+    return NextResponse.json(
+      {
+        error: networkOnly
+          ? "本地服务无法连接腾讯地图。若由 Codex 启动，请以前台联网权限重新启动；若自行启动，请检查代理、防火墙和网络连接。"
+          : `腾讯地图全部分类检索失败：${Array.from(new Set(errors)).slice(0, 3).join("；")}`,
+        errorCode: networkOnly ? "upstream-network" : "upstream-rejected",
+        region,
+        count: 0,
+        categories: results.map((result) => ({
+          name: result.keyword,
+          count: result.data.length,
+          error: result.error,
+        })),
+        points: [],
+      },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({
     region,

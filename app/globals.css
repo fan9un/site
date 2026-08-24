@@ -2672,6 +2672,47 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: wait;
 }
 
+.import-live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(82, 126, 107, 0.2);
+  border-radius: 10px;
+  color: #36584c;
+  background: rgba(225, 240, 231, 0.75);
+}
+
+.import-live-status span:last-child,
+.import-live-status b,
+.import-live-status small {
+  display: block;
+}
+
+.import-live-status b {
+  font-size: 9px;
+}
+
+.import-live-status small {
+  margin-top: 2px;
+  color: #71837c;
+  font-size: 7px;
+}
+
+.status-spinner {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(51, 104, 84, 0.2);
+  border-top-color: #336854;
+  border-radius: 50%;
+  animation: import-spin 0.8s linear infinite;
+}
+
+@keyframes import-spin {
+  to { transform: rotate(360deg); }
+}
+
 .modal-secondary:disabled {
   opacity: 0.45;
   cursor: not-allowed;
