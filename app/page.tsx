@@ -167,7 +167,7 @@ type AnalysisScenario = {
   isImported: boolean;
   employmentPoiCount: number;
   estimatedJobs: number | null;
-  employmentDataStatus: "demo" | "poi_proxy" | "enterprise" | "qcc" | "template";
+  employmentDataStatus: "none" | "demo" | "poi_proxy" | "enterprise" | "qcc" | "template";
   employmentCalibration?: {
     matched: number;
     disclosedEmployees: number;
@@ -177,7 +177,7 @@ type AnalysisScenario = {
   };
   routeMatrix?: TravelTimeMatrix;
   hedonicAudit?: HedonicAudit;
-  parcelDataStatus: "demo" | "proxy" | "legal";
+  parcelDataStatus: "none" | "demo" | "proxy" | "legal";
   dataNote: string;
 };
 
@@ -914,18 +914,6 @@ const existingFacilities: Facility[] = [
   { id: "s-03", type: "safety", name: "西城警务站", lat: 24.521, lng: 118.085, capacity: 1, quality: 0.82, openingYear: 2011 },
 ];
 
-const landParcels: LandParcel[] = [
-  { id: "E-12", name: "东南生活圈 E-12", center: { lat: 24.487, lng: 118.158 }, area: 1.4, landPrice: 285, landUse: "vacant", zoningAllowed: ["medical", "care", "retail"], demolitionDifficulty: 0.08, policyCertainty: 0.93, risk: 0.16 },
-  { id: "G-04", name: "工业支路更新 G-04", center: { lat: 24.496, lng: 118.154 }, area: 2.2, landPrice: 210, landUse: "industrial_renewal", zoningAllowed: ["green", "culture", "transit"], demolitionDifficulty: 0.38, policyCertainty: 0.86, risk: 0.29 },
-  { id: "S-09", name: "轨道站西北 S-09", center: { lat: 24.5, lng: 118.151 }, area: 2.6, landPrice: 330, landUse: "greenfield", zoningAllowed: ["education", "medical", "transit"], demolitionDifficulty: 0.12, policyCertainty: 0.9, risk: 0.13 },
-  { id: "C-03", name: "滨河路口 C-03", center: { lat: 24.513, lng: 118.101 }, area: 0.9, landPrice: 360, landUse: "vacant", zoningAllowed: ["care", "medical", "culture"], demolitionDifficulty: 0.1, policyCertainty: 0.91, risk: 0.27 },
-  { id: "T-08", name: "河湾大道 T-08", center: { lat: 24.517, lng: 118.113 }, area: 1.3, landPrice: 310, landUse: "greenfield", zoningAllowed: ["transit", "retail", "safety"], demolitionDifficulty: 0.09, policyCertainty: 0.88, risk: 0.21 },
-  { id: "G-11", name: "旧厂院更新 G-11", center: { lat: 24.522, lng: 118.091 }, area: 1.7, landPrice: 245, landUse: "brownfield", zoningAllowed: ["green", "care", "culture"], demolitionDifficulty: 0.44, policyCertainty: 0.82, risk: 0.35 },
-  { id: "P-02", name: "北园中轴 P-02", center: { lat: 24.537, lng: 118.14 }, area: 1.1, landPrice: 440, landUse: "vacant", zoningAllowed: ["culture", "education", "green"], demolitionDifficulty: 0.06, policyCertainty: 0.94, risk: 0.09 },
-  { id: "J-05", name: "南湖轨道上盖 J-05", center: { lat: 24.506, lng: 118.145 }, area: 0.8, landPrice: 510, landUse: "vacant", zoningAllowed: ["retail", "dining", "care"], demolitionDifficulty: 0.15, policyCertainty: 0.96, risk: 0.08 },
-  { id: "W-07", name: "西城更新单元 W-07", center: { lat: 24.525, lng: 118.076 }, area: 1.2, landPrice: 385, landUse: "industrial_renewal", zoningAllowed: ["green", "education", "safety"], demolitionDifficulty: 0.32, policyCertainty: 0.79, risk: 0.24 },
-];
-
 const preferenceProfiles: Record<string, Record<string, number>> = {
   elderly: { medical: 1.8, care: 2, green: 1.3, transit: 1.2, retail: 1.1 },
   family: { education: 2, green: 1.5, safety: 1.4, care: 1.3, retail: 1.2 },
@@ -1270,6 +1258,7 @@ function generateCandidates(
   zones: HousingZone[],
   constraints: SiteConstraint[] = [],
 ): GeneratedCandidate[] {
+  if (!zones.length) return [];
   return parcels.flatMap((parcel) =>
     parcel.zoningAllowed.flatMap((factor) => {
       const config = facilityTypeConfig[factor];
@@ -1692,21 +1681,70 @@ function deterministicNoise(sample: number, key: string) {
   return (value - Math.floor(value)) * 2 - 1;
 }
 
-const demoScenario: AnalysisScenario = {
-  region: "厦门市湖里区",
-  center: { lat: 24.5127, lng: 118.1392 },
-  zones: housingZones,
-  facilities: existingFacilities,
+const emptyScenario: AnalysisScenario = {
+  region: "",
+  center: { lat: 35.8617, lng: 104.1954 },
+  zones: [],
+  facilities: [],
   constraints: [],
-  parcels: landParcels,
-  regionalContext: regionalContextMetrics,
-  hasMarketPrices: true,
+  parcels: [],
+  regionalContext: Object.fromEntries(
+    Object.keys(regionalContextMetrics).map((key) => [key, 0]),
+  ),
+  hasMarketPrices: false,
   isImported: false,
   employmentPoiCount: 0,
   estimatedJobs: null,
-  employmentDataStatus: "demo",
-  parcelDataStatus: "demo",
-  dataNote: "内置演示场景：社区、人口、风险、房价与规划年份均为模型演示数据。",
+  employmentDataStatus: "none",
+  parcelDataStatus: "none",
+  dataNote: "尚未选择分析区域。导入地图数据或手动建立居住区后才会运行模型。",
+};
+
+const emptyMetricMap = Object.fromEntries(
+  housingFactors.map((factor) => [factor.key, 0]),
+) as MetricMap;
+
+const emptyHousingView = {
+  id: "",
+  name: "尚未选择区域",
+  subtitle: "等待导入或手动构建",
+  coord: emptyScenario.center,
+  population: 0,
+  annualGrowth: 0,
+  demographics: {
+    elderlyRatio: 0,
+    childRatio: 0,
+    workingAgeRatio: 0,
+    avgIncome: 0,
+  },
+  price: 0,
+  priceReason: "尚未导入房价数据。",
+  risks: { geological: 0, flood: 0, pollution: 0, industrial: 0, noise: 0 },
+  service: 0,
+  score: 0,
+  equityScore: 0,
+  rawScore: 0,
+  riskMultiplier: 1,
+  metrics: emptyMetricMap,
+  weights: Object.fromEntries(housingFactors.map((factor) => [factor.key, factor.weight])),
+  transportBreakdown: {
+    walking: 0,
+    cycling: 0,
+    bus: 0,
+    busNode: 0,
+    brtNode: 0,
+    metro: 0,
+    road: 0,
+    ferryRail: 0,
+    bikeInfrastructure: 0,
+    ferryNode: 0,
+    railNode: 0,
+  },
+  interactionEffect: 0,
+  ringScores: { inner: 0, middle: 0, outer: 0 },
+  valueIndex: 0,
+  priceIndex: 0,
+  residual: 0,
 };
 
 function selectDistributedPois(points: TencentPoi[], count: number) {
@@ -1805,11 +1843,7 @@ function buildImportedScenario(region: string, points: TencentPoi[]): AnalysisSc
   );
   const middleDefaults = Object.fromEntries(
     housingFactors.map((factor) => {
-      const average = housingZones.reduce(
-        (sum, zone) => sum + (zone.metrics[factor.key] ?? 60),
-        0,
-      ) / housingZones.length;
-      return [factor.key, factor.ring === "inner" ? 0 : average];
+      return [factor.key, factor.ring === "inner" ? 0 : 50];
     }),
   );
   const zones: HousingZone[] = zoneSources.map((point, index) => ({
@@ -2056,7 +2090,7 @@ export default function Home() {
   const [mapScale, setMapScale] = useState<MapScale>("local");
   const [mapView, setMapView] = useState<MapView>("real");
   const [routeProfile, setRouteProfile] = useState<RouteMatrixProfile>("driving");
-  const [activeHousingId, setActiveHousingId] = useState("donggang");
+  const [activeHousingId, setActiveHousingId] = useState("");
   const [activeRecommendationId, setActiveRecommendationId] = useState("");
   const [activeStadiumId, setActiveStadiumId] = useState("linhai");
   const [fairnessWeight, setFairnessWeight] = useState(68);
@@ -2065,15 +2099,15 @@ export default function Home() {
   const [matchScenario, setMatchScenario] =
     useState<MatchScenarioKey>("final");
   const [factorView, setFactorView] = useState<"core" | "all">("all");
-  const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("none");
+  const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("import");
   const [importKey, setImportKey] = useState("");
   const [qccAuthorization, setQccAuthorization] = useState("");
-  const [importRegion, setImportRegion] = useState("厦门市湖里区");
+  const [importRegion, setImportRegion] = useState("");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [importErrorMessage, setImportErrorMessage] = useState("");
   const [pipelineStatus, setPipelineStatus] = useState("");
   const [analysisScenario, setAnalysisScenario] =
-    useState<AnalysisScenario>(demoScenario);
+    useState<AnalysisScenario>(emptyScenario);
   const [worldCupFacilities, setWorldCupFacilities] =
     useState<ManualWorldCupFacility[]>([]);
   const [customStadiums, setCustomStadiums] = useState<Stadium[]>([]);
@@ -2082,18 +2116,19 @@ export default function Home() {
   const [manualName, setManualName] = useState("");
   const [manualType, setManualType] = useState("社区卫生服务中心");
   const [manualCapacity, setManualCapacity] = useState("1200");
-  const [manualLat, setManualLat] = useState(String(demoScenario.center.lat));
-  const [manualLng, setManualLng] = useState(String(demoScenario.center.lng));
+  const [manualLat, setManualLat] = useState("");
+  const [manualLng, setManualLng] = useState("");
   const [manualQuality, setManualQuality] = useState("0.85");
   const [manualOpeningYear, setManualOpeningYear] = useState(String(BASE_YEAR));
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      text: "我已读取当前空间评分。东港里是住房模式下的优先补短板区域；若切换世界杯模式，我会改用场馆承载力约束。",
+      text: "请先选择分析区域或手动建立居住区。数据导入完成后，我会解释价值评分、公平差距与组合选址建议。",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
   const [toast, setToast] = useState("");
+  const hasHousingData = analysisScenario.zones.length > 0;
 
   const generatedCandidates = useMemo(
     () =>
@@ -2212,7 +2247,9 @@ export default function Home() {
   const equityGini = 100 - fairness;
 
   const activeHousing =
-    housingScores.find((zone) => zone.id === activeHousingId) ?? housingScores[0];
+    housingScores.find((zone) => zone.id === activeHousingId) ??
+    housingScores[0] ??
+    emptyHousingView;
   const availableStadiums = useMemo(
     () => [...stadiums, ...customStadiums],
     [customStadiums],
@@ -2284,6 +2321,7 @@ export default function Home() {
 
   const recommendationSchematicPoints = useMemo(() => {
     const selected = housingOptimization.selected.slice(0, 3);
+    if (!selected.length || !analysisScenario.zones.length) return [];
     const coords = [
       ...analysisScenario.zones.map((zone) => zone.coord),
       ...selected.map((candidate) => candidate.center),
@@ -2517,18 +2555,22 @@ export default function Home() {
   const activeMetrics =
     mode === "housing" ? activeHousing.metrics : cupMetrics;
   const currentScale = mapScales[mapScale];
-  const scaleLocation = `${analysisScenario.region} · ${
-    mapScale === "local" ? "近邻服务" : mapScale === "city" ? "城市结构" : "区域联系"
-  }`;
+  const scaleLocation = hasHousingData
+    ? `${analysisScenario.region} · ${
+        mapScale === "local" ? "近邻服务" : mapScale === "city" ? "城市结构" : "区域联系"
+      }`
+    : "尚未建立分析场景";
   const scaleTitle =
-    mapScale === "local"
+    !hasHousingData
+      ? "请选择需要分析的城市或城区"
+      : mapScale === "local"
       ? "社区设施精细评估"
       : mapScale === "city"
         ? "高等级服务与跨区可达"
         : "都市圈与长期背景情景";
   const markers =
     mode === "housing"
-      ? analysisScenario.isImported
+      ? !hasHousingData || analysisScenario.isImported
         ? []
         : housingMarkers.filter((marker) => marker.ring === currentScale.ring)
       : cupMarkers;
@@ -2944,21 +2986,19 @@ export default function Home() {
     }
   }
 
-  function restoreDemoScenario() {
-    setAnalysisScenario(demoScenario);
-    setWorldCupFacilities([]);
-    setCustomStadiums([]);
-    setWorldCupRegion("中国 · 东部候选赛区");
-    setWorldCupDataNote("内置场馆容量情景");
-    setActiveStadiumId("linhai");
-    setImportRegion(demoScenario.region);
-    setActiveHousingId(demoScenario.zones[0].id);
+  function clearAnalysisScenario() {
+    setAnalysisScenario(emptyScenario);
+    setImportRegion("");
+    setActiveHousingId("");
+    setActiveRecommendationId("");
     setForecastYear(2030);
     setImportErrorMessage("");
     setImportStatus("idle");
+    setPipelineStatus("");
     setMapScale("local");
     setMapView("real");
-    showToast("已恢复厦门市湖里区内置演示场景");
+    setPanel("import");
+    showToast("当前分析已清空，请选择新的区域");
   }
 
   function activateRecommendation(recommendationId: string, openRealMap = false) {
@@ -3004,10 +3044,12 @@ export default function Home() {
         const metrics = Object.fromEntries(
           housingFactors.map((factor) => [
             factor.key,
-            housingZones.reduce(
-              (sum, zone) => sum + (zone.metrics[factor.key] ?? 60),
-              0,
-            ) / housingZones.length,
+            analysisScenario.zones.length
+              ? analysisScenario.zones.reduce(
+                  (sum, zone) => sum + (zone.metrics[factor.key] ?? 50),
+                  0,
+                ) / analysisScenario.zones.length
+              : 50,
           ]),
         );
         const zone: HousingZone = {
@@ -3036,10 +3078,14 @@ export default function Home() {
         };
         setAnalysisScenario((scenario) => ({
           ...scenario,
+          region: scenario.region || "手动构建区域",
+          center: scenario.zones.length ? scenario.center : coord,
           zones: [...scenario.zones, zone],
           parcels: [...scenario.parcels, ...buildProxyParcels([zone])],
           hasMarketPrices: false,
-          dataNote: `${scenario.dataNote} 已加入手动居住区；人口、风险和候选用地仍需校准。`,
+          isImported: true,
+          parcelDataStatus: "proxy",
+          dataNote: `${scenario.zones.length ? scenario.dataNote : "已建立手动分析场景。"} 已加入手动居住区；人口、风险和候选用地仍需校准。`,
         }));
         setActiveHousingId(id);
       } else {
@@ -3122,6 +3168,18 @@ export default function Home() {
   function submitChat(text?: string) {
     const question = (text ?? chatInput).trim();
     if (!question) return;
+    if (mode === "housing" && !hasHousingData) {
+      setMessages((items) => [
+        ...items,
+        { role: "user", text: question },
+        {
+          role: "assistant",
+          text: "当前还没有分析区域和社区数据。请先点击“选择分析区域”导入地图数据，或手动添加一个居住区；之后我才能基于真实场景解释评分和选址。",
+        },
+      ]);
+      setChatInput("");
+      return;
+    }
     const asksAboutPrice = /房价|价格|偏差|高估|低估/.test(question);
     const context =
       mode === "housing"
@@ -3177,7 +3235,13 @@ export default function Home() {
         <div className="top-actions">
           <button className="connection-pill" onClick={() => setPanel("import")}>
             <span className={importStatus === "done" ? "status-dot live" : "status-dot"} />
-            {importStatus === "done" ? "腾讯地图已连接" : "演示数据"}
+            {mode === "housing"
+              ? hasHousingData
+                ? "区域数据已连接"
+                : "选择分析区域"
+              : importStatus === "done"
+                ? "赛事数据已连接"
+                : "导入赛事数据"}
           </button>
           <button className="icon-button" aria-label="查看模型说明" onClick={() => setPanel("model")}>
             ?
@@ -3192,7 +3256,6 @@ export default function Home() {
         <aside className="control-rail">
           <div className="rail-heading">
             <span className="eyebrow">决策控制台</span>
-            <span className="version">MODEL 3.0</span>
           </div>
 
           <div className="control-group">
@@ -3282,7 +3345,7 @@ export default function Home() {
             </div>
           )}
 
-          {mode === "housing" && (
+          {mode === "housing" && (hasHousingData ? (
             <div className={`data-provenance ${analysisScenario.isImported || analysisScenario.parcelDataStatus === "proxy" ? "proxy" : "demo"}`}>
               <div>
                 <b>{analysisScenario.region}</b>
@@ -3293,31 +3356,36 @@ export default function Home() {
                       ? analysisScenario.hedonicAudit?.isTemplate || analysisScenario.employmentDataStatus === "template"
                         ? "模板试算场景"
                         : "已校准场景"
-                      : "内置演示场景"}
+                      : "当前分析场景"}
                 </span>
               </div>
               <p>{analysisScenario.dataNote}</p>
               <div className="provenance-stats">
                 <span><b>{analysisScenario.employmentPoiCount}</b>{analysisScenario.employmentDataStatus === "template" ? "示例就业点" : "就业点"}</span>
-                <span><b>{analysisScenario.employmentDataStatus === "qcc" ? "企查查" : analysisScenario.employmentDataStatus === "enterprise" ? "企业表" : analysisScenario.employmentDataStatus === "poi_proxy" ? "POI代理" : "演示"}</b>岗位口径</span>
+                <span><b>{analysisScenario.employmentDataStatus === "qcc" ? "企查查" : analysisScenario.employmentDataStatus === "enterprise" ? "企业表" : analysisScenario.employmentDataStatus === "poi_proxy" ? "POI代理" : "未校准"}</b>岗位口径</span>
                 <span><b>{analysisScenario.routeMatrix ? "路网+直线" : "直线"}</b>距离口径</span>
                 <span><b>{analysisScenario.hedonicAudit ? analysisScenario.hedonicAudit.sampleSize : 0}</b>{analysisScenario.hedonicAudit?.isTemplate ? "示例成交" : "成交样本"}</span>
-                <span><b>{analysisScenario.parcelDataStatus === "legal" ? "法定" : analysisScenario.parcelDataStatus === "proxy" ? "代理" : "演示"}</b>控规地块</span>
+                <span><b>{analysisScenario.parcelDataStatus === "legal" ? "法定" : analysisScenario.parcelDataStatus === "proxy" ? "代理" : "未导入"}</b>控规地块</span>
               </div>
-              {(analysisScenario.isImported || analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal") && (
-                <button onClick={restoreDemoScenario}>恢复湖里区演示</button>
-              )}
+              <button onClick={() => setPanel("import")}>更换分析区域</button>
             </div>
-          )}
+          ) : (
+            <div className="empty-rail-state">
+              <span className="empty-rail-icon"><MapPinned size={20} /></span>
+              <b>尚未选择分析区域</b>
+              <p>选择任意城市、城区或街道后，再计算设施价值、公平性与组合选址。</p>
+              <button onClick={() => setPanel("import")}>选择分析区域</button>
+            </div>
+          ))}
 
-          <div className="factor-heading">
+          {(mode !== "housing" || hasHousingData) && <div className="factor-heading">
             <span>评估变量</span>
             <button onClick={() => setFactorView(factorView === "core" ? "all" : "core")}>
               {factorView === "core" ? `展开 ${housingFactors.length} 项` : "收起"}
             </button>
-          </div>
+          </div>}
 
-          <div className="factor-list">
+          {(mode !== "housing" || hasHousingData) && <div className="factor-list">
             {factors.slice(0, factorView === "core" ? 9 : factors.length).map((factor) => {
               const score = activeMetrics[factor.key] ?? 0;
               const FactorIcon = factorIcons[factor.key] ?? MapPinned;
@@ -3343,16 +3411,16 @@ export default function Home() {
                 </div>
               );
             })}
-          </div>
+          </div>}
 
-          {factorView === "all" && mode === "housing" && (
+          {factorView === "all" && mode === "housing" && hasHousingData && (
             <div className="extended-factors">
               <span>空间—人群—风险联合模型</span>
               <p>内圈由设施坐标、容量、品质和距离衰减计算；权重随人口结构变化，最终价值再乘多维风险折扣。</p>
             </div>
           )}
 
-          {mode === "housing" && (
+          {mode === "housing" && hasHousingData && (
             <div className="transport-breakdown">
               <div>
                 <span>综合交通构成</span>
@@ -3409,15 +3477,12 @@ export default function Home() {
               </h1>
             </div>
             <div className="map-actions">
-              {mode === "housing" && mapView === "real" && (
-                <div className="map-fusion-badge" aria-label="腾讯地图与天地图融合视图">
-                  <i />
-                  腾讯底图 × 天地图增强
-                </div>
-              )}
-              <button onClick={() => showToast("已聚焦全部分析对象")}>⌖ 全域</button>
+              <button
+                disabled={mode === "housing" && !hasHousingData}
+                onClick={() => showToast("已聚焦全部分析对象")}
+              >⌖ 全域</button>
               <button onClick={() => setPanel("import")}>⇩ 导入数据</button>
-              {mode === "housing" && (
+              {mode === "housing" && hasHousingData && (
                 <button
                   className={mapView === "real" ? "active" : ""}
                   onClick={() =>
@@ -3435,7 +3500,7 @@ export default function Home() {
               mode === "housing" && mapView === "real" ? "real-map" : ""
             }`}
           >
-            {mode === "housing" && mapView === "real" && (
+            {mode === "housing" && hasHousingData && mapView === "real" && (
               <TencentPlanningMap
                 apiKey={tencentMapKey}
                 scale={mapScale}
@@ -3449,27 +3514,39 @@ export default function Home() {
                 }
               />
             )}
-            {mode === "housing" && mapView === "real" && analysisScenario.isImported && (
+            {mode === "housing" && hasHousingData && mapView === "real" && analysisScenario.isImported && (
               <div className="map-source-legend" aria-label="融合数据来源图例">
                 <span><i className="source-tencent" />腾讯位置</span>
                 <span><i className="source-tianditu" />天地图补充</span>
                 <span><i className="source-verified" />双源确认</span>
               </div>
             )}
-            {mode === "housing" && housingOptimization.selected.length > 0 && (
+            {mode === "housing" && hasHousingData && housingOptimization.selected.length > 0 && (
               <div className="optimization-map-status">
                 <span>组合建议已上图</span>
                 <b>{housingOptimization.selected.length} 处</b>
                 <small>编号与右侧卡片一致 · 圆圈为设施服务半径</small>
               </div>
             )}
-            <div className="map-grid" />
-            <div className="water-shape" />
-            <div className="road road-one" />
-            <div className="road road-two" />
-            <div className="road road-three" />
+            {mode === "housing" && !hasHousingData && (
+              <div className="analysis-empty-map">
+                <span className="analysis-empty-icon"><MapPinned size={30} /></span>
+                <small>START A NEW ANALYSIS</small>
+                <h2>先选择需要分析的区域</h2>
+                <p>这里不会预载任何城市的演示数据。可从地图服务导入任意城市或城区，也可以手动建立场景。</p>
+                <div className="analysis-empty-actions">
+                  <button onClick={() => setPanel("import")}>选择分析区域</button>
+                  <button className="secondary" onClick={() => setPanel("manual")}>手动构建</button>
+                </div>
+              </div>
+            )}
+            {(mode !== "housing" || hasHousingData) && <div className="map-grid" />}
+            {(mode !== "housing" || hasHousingData) && <div className="water-shape" />}
+            {(mode !== "housing" || hasHousingData) && <div className="road road-one" />}
+            {(mode !== "housing" || hasHousingData) && <div className="road road-two" />}
+            {(mode !== "housing" || hasHousingData) && <div className="road road-three" />}
 
-            {mode === "housing" && (
+            {mode === "housing" && hasHousingData && (
               <div
                 className="transport-network"
                 role="img"
@@ -3510,7 +3587,7 @@ export default function Home() {
               </div>
             )}
 
-            {mode === "housing" && (
+            {mode === "housing" && hasHousingData && (
               <>
                 <div className="semantic-scale">
                   <strong>{currentScale.label}</strong>
@@ -3550,7 +3627,7 @@ export default function Home() {
               </>
             )}
 
-            {mode === "housing" ? (
+            {mode === "housing" ? (hasHousingData ? (
               mapScale === "local" ? (
                 <>
                   {analysisScenario.zones.slice(0, 5).map((zone, index) => (
@@ -3586,7 +3663,7 @@ export default function Home() {
                   <i className="region-link link-b" />
                   <i className="region-link link-c" />
                 </div>
-              )
+              )) : null
             ) : (
               <div className="stadium-ring" aria-label="场馆服务范围">
                 <span className="ring-label">5km 服务圈</span>
@@ -3636,7 +3713,7 @@ export default function Home() {
               </button>
             ))}
 
-            {mode === "housing" && mapView === "schematic" &&
+            {mode === "housing" && hasHousingData && mapView === "schematic" &&
               recommendationSchematicPoints.map(({ candidate, rank, x, y, radius }) => (
                 <button
                   key={candidate.id}
@@ -3658,7 +3735,7 @@ export default function Home() {
                 </button>
               ))}
 
-            <div className="map-legend">
+            {(mode !== "housing" || hasHousingData) && <div className="map-legend">
               {mode === "housing" ? (
                 mapView === "real" ? (
                   <>
@@ -3702,11 +3779,11 @@ export default function Home() {
                   <span><i className="legend-proposed" />建议选址</span>
                 </>
               )}
-            </div>
+            </div>}
           </div>
 
           <div className="score-strip">
-            {mode === "housing" ? (
+            {mode === "housing" ? (hasHousingData ? (
               <>
                 <div className="score-main">
                   <span className="score-badge">{Math.round(activeHousing.score)}</span>
@@ -3755,6 +3832,11 @@ export default function Home() {
                 </div>
               </>
             ) : (
+              <div className="score-empty-state">
+                <span>等待分析区域</span>
+                <strong>导入区域后生成价值、公平性与选址结果</strong>
+              </div>
+            )) : (
               <>
                 <div className="score-main">
                   <span className="score-badge coral">{Math.round(stadiumScore)}</span>
@@ -3789,9 +3871,17 @@ export default function Home() {
               <i className="pulse" />
               优化引擎
             </span>
-            <small>刚刚更新</small>
+            <small>{mode === "housing" && !hasHousingData ? "等待区域" : "刚刚更新"}</small>
           </div>
 
+          {mode === "housing" && !hasHousingData ? (
+            <section className="insight-empty-state">
+              <span><MapPinned size={22} /></span>
+              <h2>优化引擎等待数据</h2>
+              <p>选择分析区域后，系统才会计算公平指数、敏感性与组合选址，避免把空场景显示为 0 分。</p>
+              <button onClick={() => setPanel("import")}>开始选择区域</button>
+            </section>
+          ) : (<>
           <section className="fairness-card">
             <div className="fairness-top">
               <span>
@@ -3955,6 +4045,7 @@ export default function Home() {
             <span>运行新一轮优化</span>
             <small>{mode === "housing" ? "自动候选生成 · 多社区溢出 · 贪心 + 局部交换" : "动态需求链 · 全生命周期成本 · 赛后闲置 CVaR"}</small>
           </button>
+          </>)}
         </aside>
       </section>
 
@@ -3987,7 +4078,7 @@ export default function Home() {
             <button type="button" onClick={() => submitChat("把公平性权重提高后会怎样？")}>
               对比公平 / 效率
             </button>
-            {mode === "housing" && (
+            {mode === "housing" && hasHousingData && (
               <button type="button" onClick={() => submitChat(`${activeHousing.name}的房价为什么与模型价值有偏差？`)}>
                 解释房价偏差
               </button>
@@ -4028,7 +4119,12 @@ export default function Home() {
                 <form onSubmit={handleTencentImport}>
                   <label>
                     分析区域
-                    <input value={importRegion} onChange={(event) => setImportRegion(event.target.value)} />
+                    <input
+                      value={importRegion}
+                      onChange={(event) => setImportRegion(event.target.value)}
+                      placeholder="例如：北京市海淀区"
+                      autoFocus
+                    />
                   </label>
                   <label>
                     临时覆盖 Key <span>（可选，不会保存）</span>
@@ -4141,9 +4237,9 @@ export default function Home() {
                     按所选方式刷新路网矩阵
                   </button>
                 </section>
-                {(analysisScenario.isImported || analysisScenario.hedonicAudit || analysisScenario.parcelDataStatus === "legal") && (
-                  <button className="modal-secondary" type="button" onClick={restoreDemoScenario}>
-                    恢复厦门市湖里区内置演示
+                {hasHousingData && (
+                  <button className="modal-secondary" type="button" onClick={clearAnalysisScenario}>
+                    清空当前分析并选择新区
                   </button>
                 )}
               </>
