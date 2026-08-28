@@ -14,19 +14,17 @@ function validCompany(value: CompanyInput) {
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
     companies?: CompanyInput[];
-    authorization?: string;
   };
   const companies = (body.companies ?? []).filter(validCompany).slice(0, 6);
   if (!companies.length) {
     return NextResponse.json({ error: "请先提供 1–6 个带名称的企业就业点。" }, { status: 400 });
   }
 
-  const supplied = body.authorization?.trim();
   const configured = process.env.QCC_AUTHORIZATION?.trim();
-  const rawAuthorization = configured || supplied;
+  const rawAuthorization = configured;
   if (!rawAuthorization) {
     return NextResponse.json(
-      { error: "服务端尚未配置企查查授权；可临时输入 Token，或设置 QCC_AUTHORIZATION。" },
+      { error: "服务端尚未配置企查查授权，请由管理员设置 QCC_AUTHORIZATION。" },
       { status: 503 },
     );
   }

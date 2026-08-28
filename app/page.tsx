@@ -4,6 +4,7 @@ import {
   ChangeEvent,
   FormEvent,
   type CSSProperties,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -2356,8 +2357,6 @@ export default function Home() {
     useState<MatchScenarioKey>("final");
   const [factorView, setFactorView] = useState<"core" | "all">("all");
   const [panel, setPanel] = useState<"none" | "import" | "manual" | "model">("import");
-  const [importKey, setImportKey] = useState("");
-  const [qccAuthorization, setQccAuthorization] = useState("");
   const [importRegion, setImportRegion] = useState("");
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [importErrorMessage, setImportErrorMessage] = useState("");
@@ -2401,8 +2400,22 @@ export default function Home() {
       analysisScenario.zones,
     ],
   );
-  const tencentMapKey =
-    process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim() ?? "";
+  const [tencentMapKey, setTencentMapKey] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/tencent/browser-key", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((payload: { key?: string }) => {
+        if (!cancelled && payload.key) setTencentMapKey(payload.key);
+      })
+      .catch(() => {
+        if (!cancelled) setTencentMapKey("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const housingScores = useMemo(() => {
     const modelRows = analysisScenario.zones.map((zone) => ({
@@ -3032,9 +3045,6 @@ export default function Home() {
             id: facility.id,
             name: facility.name,
           })),
-          ...(qccAuthorization.trim()
-            ? { authorization: qccAuthorization.trim() }
-            : {}),
         }),
       });
       const payload = (await response.json()) as {
@@ -3188,7 +3198,6 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          key: importKey.trim(),
           region: requestedRegion,
           mode,
         }),
@@ -4660,8 +4669,8 @@ export default function Home() {
                 <h2>{mode === "housing" ? "建立可审计的真实数据链" : "建立世界杯赛事空间数据链"}</h2>
                 <p className="modal-lead">
                   {mode === "housing"
-                    ? "地图 POI 负责发现位置，OSRM 负责行车时间；企业清单校准岗位和行业，成交记录只用于评分后的享乐价格审计，法定控规面替换代理候选网格。每一层都保留来源等级，不把代理值冒充法定或统计数据。"
-                    : "腾讯地图检索场馆与赛事设施，天地图补充并交叉确认公共设施，OSRM 计算场馆到酒店、交通、医疗、餐饮和公卫节点的行车时间。容量缺少官方数据时会明确标记为代理值。"}
+                    ? "地图 POI 负责发现位置，OSRM 负责行车时间；企业清单校准岗位和行业，成交记录只用于评分后的享乐价格审计，法定控规面替换代理候选网格。全部服务凭证仅保存在服务端，不在页面收集或展示。"
+                    : "腾讯地图检索场馆与赛事设施，天地图补充并交叉确认公共设施，OSRM 计算场馆到酒店、交通、医疗、餐饮和公卫节点的行车时间。全部服务凭证仅保存在服务端。"}
                 </p>
                 <form onSubmit={handleTencentImport}>
                   <label>
@@ -4671,15 +4680,6 @@ export default function Home() {
                       onChange={(event) => setImportRegion(event.target.value)}
                       placeholder="例如：北京市海淀区"
                       autoFocus
-                    />
-                  </label>
-                  <label>
-                    临时覆盖 Key <span>（可选，不会保存）</span>
-                    <input
-                      value={importKey}
-                      onChange={(event) => setImportKey(event.target.value)}
-                      placeholder="留空则使用已安全配置的服务端 Key"
-                      type="password"
                     />
                   </label>
                   <div className="import-pipeline">
@@ -4720,17 +4720,8 @@ export default function Home() {
                   <div>
                     <span>QCC COMPANY MCP</span>
                     <b>校准行业与岗位人数</b>
-                    <p>保留腾讯地图坐标作为工作地点代理，只对唯一精确主体读取企查查行业与最新年报。人数未披露时，参保人数仅作为下界代理；同名多候选不会自动选中。</p>
+                    <p>凭证仅由服务端 Secret 注入。保留腾讯地图坐标作为工作地点代理，只对唯一精确主体读取企查查行业与最新年报；同名多候选不会自动选中。</p>
                   </div>
-                  <label>
-                    临时企查查 Token <span>（服务端已配置可留空，不会保存）</span>
-                    <input
-                      value={qccAuthorization}
-                      onChange={(event) => setQccAuthorization(event.target.value)}
-                      placeholder="Bearer …"
-                      type="password"
-                    />
-                  </label>
                   <button
                     className="modal-secondary"
                     type="button"

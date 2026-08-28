@@ -49,7 +49,6 @@ const worldCupKeywords = [
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
-    key?: string;
     region?: string;
     mode?: "housing" | "worldcup";
   };
@@ -57,9 +56,7 @@ export async function POST(request: NextRequest) {
   const keyCandidates = Array.from(
     new Set(
       [
-        body.key?.trim(),
         process.env.TENCENT_MAP_SERVICE_KEY?.trim(),
-        process.env.NEXT_PUBLIC_TENCENT_MAP_KEY?.trim(),
       ].filter((value): value is string => Boolean(value)),
     ),
   );
